@@ -1,0 +1,431 @@
+:root {
+    /* Altura del panel de información y separación respecto al borde
+       inferior. Están aquí (y no dentro de #panel-info) porque el
+       panel de botones también las necesita para ubicarse siempre
+       debajo del panel, sin taparlo. */
+    --alto-panel: 48vh;
+    --separacion-panel: 1.25rem;
+    /* Espacio reservado para la fila de botones de navegación, pegada
+       al borde inferior; el panel de información se apila justo encima. */
+    --altura-botones: 4.75rem;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0e14;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ---------- Contenedor de la escena 3D ---------- */
+
+#contenedor3D {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    opacity: 0;
+    transition: opacity 0.8s ease;
+}
+
+#contenedor3D.visible {
+    opacity: 1;
+}
+
+#contenedor3D canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* ---------- Pantalla de carga ---------- */
+
+#pantalla-carga {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1000;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    background: radial-gradient(circle at center, #1a2332 0%, #0a0e14 100%);
+
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+
+#pantalla-carga.oculto {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.carga-contenido {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 2rem;
+    max-width: 90vw;
+}
+
+.spinner {
+    width: 56px;
+    height: 56px;
+    border: 3px solid rgba(255, 255, 255, 0.12);
+    border-top-color: #c9a24b;
+    border-radius: 50%;
+    animation: girar 0.9s linear infinite;
+    margin-bottom: 1.75rem;
+}
+
+@keyframes girar {
+    to { transform: rotate(360deg); }
+}
+
+.carga-titulo {
+    color: #f4f1ea;
+    font-size: 1.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.5rem;
+}
+
+.carga-subtitulo {
+    color: #9aa5b1;
+    font-size: 0.95rem;
+    font-weight: 400;
+    margin-bottom: 2rem;
+    letter-spacing: 0.02em;
+}
+
+.barra-contenedor {
+    width: min(320px, 70vw);
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 0.75rem;
+}
+
+.barra-progreso {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #c9a24b, #e8c97a);
+    border-radius: 999px;
+    transition: width 0.3s ease-out;
+}
+
+.texto-progreso {
+    color: #c9a24b;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+/* ---------- Título del sitio (arriba a la izquierda) ---------- */
+
+#sitio-titulo {
+    position: fixed;
+    top: 1.5rem;
+    left: 1.75rem;
+    z-index: 20;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* centra la línea más corta respecto a la más ancha */
+    line-height: 1.15;
+
+    /* Sin fondo ni recuadro: el título flota directamente sobre la
+       escena 3D, apoyado por una sombra grande para que se lea bien
+       sobre cualquier fondo. */
+    font-family: 'Arial Black', 'Arial Bold', Arial, sans-serif;
+    font-weight: 900;
+
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-10px);
+    transition: opacity 0.8s ease 0.3s, transform 0.8s ease 0.3s;
+}
+
+#contenedor3D.visible ~ #sitio-titulo {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.sitio-titulo-linea1,
+.sitio-titulo-linea2 {
+    font-size: 2rem;
+    letter-spacing: 0.02em;
+
+    /* Degradado dorado aplicado directamente al texto */
+    background: linear-gradient(90deg, #f4f1ea 0%, #e8c97a 55%, #c9a24b 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+
+    /* Sombreado grande en vez de un fondo sólido */
+    filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.85))
+            drop-shadow(0 0 22px rgba(0, 0, 0, 0.6));
+}
+
+/* ---------- Panel inferior de información ---------- */
+
+#panel-info {
+    position: fixed;
+    left: 50%;
+    /* Apilado justo encima del panel de botones, que queda pegado abajo. */
+    bottom: calc(var(--altura-botones) + var(--separacion-panel));
+    width: 100%;
+    max-width: 640px;
+    z-index: 12;
+
+    background: rgba(10, 14, 20, 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(201, 162, 75, 0.35);
+    border-radius: 14px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 20px);
+    transition: opacity 0.7s ease, transform 0.7s ease, bottom 0.45s ease;
+}
+
+/* Se activa por JS cuando ya hay contenido cargado para mostrar */
+#panel-info.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+}
+
+#panel-info-toggle {
+    position: absolute;
+    top: -18px;
+    right: 1.25rem;
+
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(201, 162, 75, 0.5);
+    background: #12161f;
+    color: #c9a24b;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.4s ease, background 0.25s ease;
+}
+
+#panel-info-toggle:hover {
+    background: rgba(201, 162, 75, 0.18);
+}
+
+.panel-info-flecha {
+    transition: transform 0.4s ease;
+}
+
+/* Estado colapsado: el panel se retrae dejando solo el asa visible */
+#panel-info.colapsado .panel-info-scroll {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+}
+
+#panel-info.colapsado #panel-info-toggle .panel-info-flecha {
+    transform: rotate(180deg);
+}
+
+.panel-info-scroll {
+    max-height: var(--alto-panel);
+    overflow-y: auto;
+    padding: 1.75rem 1.75rem 1.5rem;
+    transition: max-height 0.45s ease, padding 0.45s ease, opacity 0.3s ease;
+}
+
+.panel-info-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.panel-info-scroll::-webkit-scrollbar-thumb {
+    background: rgba(201, 162, 75, 0.4);
+    border-radius: 999px;
+}
+
+.panel-info-etiqueta {
+    display: inline-block;
+    color: #c9a24b;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+}
+
+.panel-info-titulo {
+    color: #f4f1ea;
+    font-size: 1.35rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin-bottom: 0.85rem;
+}
+
+.panel-info-texto {
+    color: #cbd2db;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    margin-bottom: 1.1rem;
+}
+
+.panel-info-fuente {
+    display: inline-block;
+    color: #e8c97a;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(232, 201, 122, 0.4);
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.panel-info-fuente:hover {
+    color: #f4f1ea;
+    border-color: #f4f1ea;
+}
+
+/* ---------- Panel de botones de navegación ---------- */
+
+#panel-botones {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.9rem;
+
+    z-index: 10;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.8s ease 0.2s, transform 0.8s ease 0.2s;
+}
+
+#panel-botones.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+
+.boton-nav {
+    padding: 0.75rem 1.5rem;
+    background: rgba(10, 14, 20, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(201, 162, 75, 0.5);
+    border-radius: 999px;
+
+    color: #f4f1ea;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+
+    cursor: pointer;
+    transition: background 0.25s ease, border-color 0.25s ease, transform 0.15s ease;
+    white-space: nowrap;
+}
+
+.boton-nav:hover:not(:disabled) {
+    background: rgba(201, 162, 75, 0.18);
+    border-color: #e8c97a;
+    transform: translateY(-2px);
+}
+
+.boton-nav:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.boton-nav:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+/* ---------- Responsivo ---------- */
+
+@media (max-width: 480px) {
+    :root {
+        --alto-panel: 42vh;
+        --separacion-panel: 0.85rem;
+        /* Los botones pueden ocupar dos filas en pantallas angostas */
+        --altura-botones: 6.5rem;
+    }
+
+    .carga-titulo {
+        font-size: 1.3rem;
+    }
+
+    .carga-subtitulo {
+        font-size: 0.85rem;
+    }
+
+    .spinner {
+        width: 44px;
+        height: 44px;
+    }
+
+    #panel-botones {
+        bottom: 1.2rem;
+        gap: 0.6rem;
+        width: 100%;
+        padding: 0 0.75rem;
+    }
+
+    .boton-nav {
+        padding: 0.6rem 1rem;
+        font-size: 0.7rem;
+    }
+
+    #sitio-titulo {
+        top: 1rem;
+        left: 1rem;
+    }
+
+    .sitio-titulo-linea1,
+    .sitio-titulo-linea2 {
+        font-size: 1.4rem;
+    }
+
+    #panel-info {
+        width: calc(100% - 1.5rem);
+        max-width: none;
+    }
+
+    .panel-info-scroll {
+        padding: 1.4rem 1.4rem 1.2rem;
+    }
+
+    .panel-info-titulo {
+        font-size: 1.15rem;
+    }
+}

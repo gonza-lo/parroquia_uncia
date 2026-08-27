@@ -1,0 +1,402 @@
+/* ==========================================================
+   BOTONES SUPERIORES (arriba a la derecha): Ubicación y
+   Desarrollado por. Comparten un mismo contenedor para que se
+   revelen y se acomoden juntos, uno al lado del otro.
+   ========================================================== */
+
+#botones-superiores {
+    position: fixed;
+    top: 1.5rem;
+    right: 1.75rem;
+    z-index: 20;
+
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.35rem;
+
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-10px);
+    transition: opacity 0.8s ease 0.3s, transform 0.8s ease 0.3s;
+}
+
+/* Se revela junto con el resto de la interfaz, cuando la escena ya está lista */
+#contenedor3D.visible ~ #botones-superiores {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.boton-desarrollador {
+    position: relative;
+    min-height: 2.75rem;
+    padding: 0.72rem 1.2rem;
+    overflow: hidden;
+
+    background: linear-gradient(135deg, rgba(28, 34, 45, 0.88), rgba(10, 14, 20, 0.72));
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    border: 1px solid rgba(232, 201, 122, 0.42);
+    border-radius: 0.8rem;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+    color: #f8f3e8;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    line-height: 1;
+    text-transform: uppercase;
+    cursor: pointer;
+    white-space: nowrap;
+
+    transition: color 0.25s ease, background 0.25s ease, border-color 0.25s ease,
+        box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+/* Brillo sutil que aparece al pasar el cursor */
+.boton-desarrollador::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.14) 50%, transparent 75%);
+    transform: translateX(-120%);
+    transition: transform 0.5s ease;
+    pointer-events: none;
+}
+
+.boton-desarrollador:hover {
+    color: #fff9e8;
+    background: linear-gradient(135deg, rgba(112, 82, 35, 0.9), rgba(42, 32, 20, 0.9));
+    border-color: rgba(248, 220, 142, 0.95);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3), 0 0 0 3px rgba(201, 162, 75, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    transform: translateY(-2px);
+}
+
+.boton-desarrollador:hover::after {
+    transform: translateX(120%);
+}
+
+.boton-desarrollador:focus-visible {
+    outline: 3px solid rgba(248, 220, 142, 0.65);
+    outline-offset: 3px;
+}
+
+.boton-desarrollador:active {
+    transform: translateY(0);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.24), inset 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+@media (max-width: 600px) {
+    #botones-superiores {
+        top: 0.85rem;
+        right: 0.85rem;
+        left: 0.85rem;
+        justify-content: flex-end;
+        gap: 0.45rem;
+        padding: 0;
+    }
+
+    .boton-desarrollador {
+        min-height: 2.45rem;
+        padding: 0.65rem 0.85rem;
+        font-size: 0.63rem;
+        letter-spacing: 0.06em;
+    }
+}
+
+/* ==========================================================
+   PANEL "DESARROLLADO POR" (superpuesto sobre la escena 3D)
+   ========================================================== */
+
+.panel-desarrollador {
+    position: fixed;
+    inset: 0;
+    z-index: 60; /* por encima de todo lo demás en pantalla */
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+
+.panel-desarrollador.visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.panel-desarrollador-fondo {
+    position: absolute;
+    inset: 0;
+    background: rgba(6, 9, 14, 0.72);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    cursor: pointer;
+}
+
+.panel-desarrollador-tarjeta {
+    position: relative;
+    width: min(380px, 100%);
+    max-height: 88vh;
+    overflow-y: auto;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+
+    padding: 2.5rem 2rem 2rem;
+    background: linear-gradient(180deg, rgba(18, 22, 31, 0.96), rgba(10, 14, 20, 0.96));
+    border: 1px solid rgba(201, 162, 75, 0.4);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.02);
+
+    transform: translateY(14px) scale(0.97);
+    opacity: 0;
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s ease;
+}
+
+.panel-desarrollador.visible .panel-desarrollador-tarjeta {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+}
+
+.panel-desarrollador-tarjeta::-webkit-scrollbar {
+    width: 6px;
+}
+
+.panel-desarrollador-tarjeta::-webkit-scrollbar-thumb {
+    background: rgba(201, 162, 75, 0.4);
+    border-radius: 999px;
+}
+
+.btn-cerrar-desarrollador {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid rgba(201, 162, 75, 0.4);
+    background: rgba(255, 255, 255, 0.03);
+    color: #c9a24b;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.25s ease, border-color 0.25s ease, transform 0.15s ease;
+}
+
+.btn-cerrar-desarrollador:hover {
+    background: rgba(201, 162, 75, 0.18);
+    border-color: #e8c97a;
+}
+
+.btn-cerrar-desarrollador:active {
+    transform: scale(0.92);
+}
+
+/* ---------- Foto de perfil ---------- */
+
+.dev-avatar-halo {
+    width: 108px;
+    height: 108px;
+    border-radius: 50%;
+    padding: 3px;
+    margin-bottom: 1.1rem;
+    background: linear-gradient(135deg, #e8c97a, #c9a24b 55%, #7a5f2c);
+    box-shadow: 0 8px 24px rgba(201, 162, 75, 0.25);
+    flex-shrink: 0;
+}
+
+.dev-avatar {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+    display: block;
+    background: #1a2332; /* se ve mientras carga o si la foto no aparece */
+    border: 3px solid #12161f;
+}
+
+/* ---------- Texto ---------- */
+
+.dev-etiqueta {
+    display: inline-block;
+    color: #c9a24b;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+}
+
+.dev-nombre {
+    color: #f4f1ea;
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    margin-bottom: 0.3rem;
+}
+
+.dev-rol {
+    color: #9aa5b1;
+    font-size: 0.85rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    margin-bottom: 1.4rem;
+}
+
+/* ---------- Correo ---------- */
+
+.dev-correo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+
+    color: #e8c97a;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 0.55rem 1.1rem;
+    border: 1px solid rgba(232, 201, 122, 0.35);
+    border-radius: 999px;
+    margin-bottom: 1.6rem;
+    transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+.dev-correo:hover {
+    background: rgba(201, 162, 75, 0.14);
+    border-color: #e8c97a;
+    color: #f4f1ea;
+}
+
+.dev-icono-linea {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+/* ---------- Redes sociales ---------- */
+
+.dev-redes {
+    display: flex;
+    gap: 0.85rem;
+}
+
+.dev-red-icono {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    color: #cbd2db;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(201, 162, 75, 0.3);
+    transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.15s ease;
+}
+
+.dev-red-icono svg {
+    width: 19px;
+    height: 19px;
+    flex-shrink: 0;
+    fill: currentColor;
+}
+
+.dev-red-icono:hover {
+    color: #12161f;
+    background: linear-gradient(135deg, #e8c97a, #c9a24b);
+    border-color: #e8c97a;
+    transform: translateY(-2px);
+}
+
+/* ==========================================================
+   PANEL "UBICACIÓN" (comparte el overlay del panel-desarrollador;
+   solo cambia el contenido y el ancho de la tarjeta, pensada para
+   alojar el mapa en vez del perfil del desarrollador)
+   ========================================================== */
+
+.panel-ubicacion-tarjeta {
+    width: min(640px, 94vw);
+}
+
+.dev-direccion {
+    color: #9aa5b1;
+    font-size: 0.85rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    margin-bottom: 1.4rem;
+}
+
+.mapa-embed {
+    width: 100%;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(201, 162, 75, 0.35);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    margin-bottom: 1.5rem;
+    background: #1a2332; /* se ve mientras el mapa carga */
+}
+
+.mapa-embed iframe {
+    display: block;
+    width: 100%;
+    height: 380px;
+    border: 0;
+}
+
+/* ---------- Responsivo ---------- */
+
+@media (max-width: 480px) {
+    #botones-superiores {
+        top: 1rem;
+        right: 1rem;
+        gap: 0.5rem;
+    }
+
+    .boton-desarrollador {
+        padding: 0.55rem 1rem;
+        font-size: 0.68rem;
+    }
+
+    .panel-desarrollador-tarjeta {
+        padding: 2.2rem 1.4rem 1.6rem;
+        border-radius: 16px;
+    }
+
+    .mapa-embed iframe {
+        height: 260px;
+    }
+
+    .dev-avatar-halo {
+        width: 92px;
+        height: 92px;
+    }
+
+    .dev-nombre {
+        font-size: 1.2rem;
+    }
+
+    .dev-redes {
+        gap: 0.65rem;
+    }
+
+    .dev-red-icono {
+        width: 38px;
+        height: 38px;
+    }
+}

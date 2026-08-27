@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escena 3D</title>
+    <link rel="stylesheet" href="style.css?v=2">
+    <link rel="stylesheet" href="desarrollador.css?v=2">
+</head>
+<body>
+
+    <!-- Pantalla de carga -->
+    <div id="pantalla-carga">
+        <div class="carga-contenido">
+            <div class="spinner"></div>
+            <h1 class="carga-titulo">Parroquia de Uncía</h1>
+            <p class="carga-subtitulo">Cargando experiencia 3D...</p>
+
+            <div class="barra-contenedor">
+                <div id="barra-progreso" class="barra-progreso"></div>
+            </div>
+            <span id="texto-progreso" class="texto-progreso">0%</span>
+        </div>
+    </div>
+
+    <!-- Contenedor de la escena 3D -->
+    <div id="contenedor3D"></div>
+
+    <!-- Título fijo del sitio, arriba a la izquierda -->
+    <div id="sitio-titulo">
+        <span class="sitio-titulo-linea1">Parroquia San Miguel</span>
+        <span class="sitio-titulo-linea2">de Uncía</span>
+    </div>
+
+    <!-- Botones superiores derechos: Ubicación y Desarrollado por.
+         Ambos abren un panel superpuesto (no navegan a otra página). -->
+    <div id="botones-superiores">
+        <button id="btn-ubicacion" class="boton-desarrollador">Ubicación</button>
+        <button id="btn-desarrollador" class="boton-desarrollador">Desarrollado por</button>
+    </div>
+
+    <!-- Paneles flotantes "Desarrollado por" y "Ubicación": van incrustados
+         aquí directamente (ya no se cargan por fetch) para que aparezcan
+         siempre, sin depender de una petición extra que el navegador
+         pudiera servir desde una copia vieja en caché. Se muestran
+         superpuestos sobre la escena 3D al hacer clic en sus botones
+         (ver script.js). -->
+    <div id="panel-desarrollador" class="panel-desarrollador">
+
+        <!-- Fondo oscuro clicable: al hacer clic fuera de la tarjeta, se cierra el panel -->
+        <div id="fondo-desarrollador" class="panel-desarrollador-fondo"></div>
+
+        <div class="panel-desarrollador-tarjeta" role="dialog" aria-label="Información del desarrollador">
+            <button id="btn-cerrar-desarrollador" class="btn-cerrar-desarrollador" aria-label="Cerrar" title="Cerrar">✕</button>
+
+            <div class="dev-avatar-halo">
+                <img src="fotos/perfil.jpeg" alt="Foto de perfil del desarrollador" class="dev-avatar">
+            </div>
+
+            <span class="dev-etiqueta">Desarrollado por</span>
+            <h2 class="dev-nombre">BELTRAN GONZALO QUISPE</h2>
+            <p class="dev-rol">Desarrollador Web &amp; Experiencias 3D</p>
+
+            <a href="mailto:tu-correo@ejemplo.com" class="dev-correo">
+                <svg class="dev-icono-linea" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <rect x="3" y="4.5" width="18" height="15" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                    <path d="M3 6.5L12 13L21 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>gonzaloquispeb@gmail.com</span>
+            </a>
+
+            <div class="dev-redes">
+                <a href="https://www.facebook.com/beltran.gonzalo.5" target="_blank" rel="noopener noreferrer" class="dev-red-icono" aria-label="Facebook" title="Facebook">
+                    <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><path d="M13.5 21v-8.2h2.75l.41-3.2h-3.16V7.6c0-.93.26-1.56 1.6-1.56h1.7V3.14C16.53 3.1 15.6 3 14.5 3c-2.28 0-3.84 1.39-3.84 3.94v2.66H8v3.2h2.66V21h2.84z"/></svg>
+                </a>
+                <a href="https://linkedin.com/in/tu-usuario" target="_blank" rel="noopener noreferrer" class="dev-red-icono" aria-label="LinkedIn" title="LinkedIn">
+                    <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><path d="M6.94 8.5H3.56V20h3.38V8.5zM5.25 3C4 3 3 4 3 5.25S4 7.5 5.25 7.5 7.5 6.5 7.5 5.25 6.5 3 5.25 3zM20.5 20h-3.37v-6.06c0-1.44-.03-3.3-2.01-3.3-2 0-2.32 1.57-2.32 3.2V20H9.44V8.5h3.24v1.57h.05c.45-.85 1.56-1.75 3.21-1.75 3.44 0 4.07 2.26 4.07 5.2V20z"/></svg>
+                </a>
+                <a href="https://github.com/tu-usuario" target="_blank" rel="noopener noreferrer" class="dev-red-icono" aria-label="GitHub" title="GitHub">
+                    <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.17c0 4.47 2.87 8.26 6.84 9.6.5.1.68-.22.68-.49 0-.24-.01-.87-.01-1.7-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.9-.63.07-.62.07-.62 1 .07 1.53 1.05 1.53 1.05.89 1.55 2.34 1.1 2.91.84.09-.66.35-1.1.63-1.35-2.22-.26-4.56-1.14-4.56-5.05 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.27 2.75 1.05a9.34 9.34 0 0 1 5 0c1.9-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.46.1 2.72.64.72 1.03 1.63 1.03 2.75 0 3.92-2.35 4.78-4.58 5.04.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.17C22 6.58 17.52 2 12 2z"/></svg>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel "Ubicación": mismo overlay que el de arriba, se abre con el
+         botón UBICACIÓN, superpuesto sobre la escena 3D. -->
+    <div id="panel-ubicacion" class="panel-desarrollador">
+
+        <!-- Fondo oscuro clicable: al hacer clic fuera de la tarjeta, se cierra el panel -->
+        <div class="panel-desarrollador-fondo"></div>
+
+        <div class="panel-desarrollador-tarjeta panel-ubicacion-tarjeta" role="dialog" aria-label="Ubicación de la parroquia">
+            <button class="btn-cerrar-desarrollador" aria-label="Cerrar" title="Cerrar">✕</button>
+
+            <span class="dev-etiqueta">Ubicación</span>
+            <h2 class="dev-nombre">Parroquia San Miguel de Uncía</h2>
+            <p class="dev-direccion">Uncía, Provincia Rafael Bustillo, Potosí, Bolivia</p>
+
+            <div class="mapa-embed">
+                <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3449.311843582361!2d-66.57463813887462!3d-18.466082880193763!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x93fce1c303cd18b9%3A0xa9e8905d527825d3!2sCatedral%20San%20Miguel%20de%20Uncia!5e1!3m2!1ses-419!2sbo!4v1787853960349!5m2!1ses-419!2sbo"
+                        width="400" height="300" style="border:0;" allowfullscreen="" loading="lazy"
+                        referrerpolicy="strict-origin-when-cross-origin" title="Mapa: Parroquia San Miguel de Uncía"></iframe>
+            </div>
+
+            <a href="https://www.google.com/maps/search/?api=1&query=Catedral+San+Miguel+de+Uncia" target="_blank" rel="noopener noreferrer" class="dev-correo">
+                <svg class="dev-icono-linea" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M12 21.5C12 21.5 19 15.06 19 10.36C19 6.29 15.87 3 12 3C8.13 3 5 6.29 5 10.36C5 15.06 12 21.5 12 21.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                    <circle cx="12" cy="10.3" r="2.6" stroke="currentColor" stroke-width="1.6"/>
+                </svg>
+                <span>Abrir en Google Maps</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Panel de botones de navegación -->
+    <div id="panel-botones">
+        <button id="btn-inicio" class="boton-nav">INICIO</button>
+        <button id="btn-interior" class="boton-nav">VER INTERIOR</button>
+        <button id="btn-altar" class="boton-nav">VER ALTAR</button>
+        <button id="btn-arcangel" class="boton-nav">VER ARCÁNGEL SAN MIGUEL</button>
+    </div>
+
+    <!-- Panel inferior de información: cambia de contenido según la vista activa -->
+    <div id="panel-info">
+        <button id="panel-info-toggle" aria-label="Mostrar u ocultar información" title="Mostrar u ocultar información">
+            <span class="panel-info-flecha">▾</span>
+        </button>
+        <div class="panel-info-scroll">
+            <span id="panel-info-etiqueta" class="panel-info-etiqueta">Acerca de este lugar</span>
+            <h2 id="panel-info-titulo" class="panel-info-titulo"></h2>
+            <p id="panel-info-texto" class="panel-info-texto"></p>
+            <a id="panel-info-fuente" class="panel-info-fuente" href="#" target="_blank" rel="noopener noreferrer">Fuente ↗</a>
+        </div>
+    </div>
+
+    <!-- ==========================================================
+         CONTENIDO DEL PANEL DE INFORMACIÓN
+         ==========================================================
+         Un bloque por cada vista. script.js solo LEE estos datos
+         (no los contiene escritos en el código); para cambiar los
+         textos, edita únicamente aquí.
+         data-vista    -> clave que usa script.js para mostrar el texto correcto
+         data-etiqueta -> etiqueta pequeña arriba del título
+         data-titulo   -> título del panel
+         data-fuente   -> enlace que abre el botón "Fuente ↗"
+         El párrafo <p> de adentro es el texto largo de cada vista.
+    ========================================================== -->
+    <div id="datos-info" hidden>
+        <div class="dato-vista"
+             data-vista="inicio"
+             data-etiqueta="Acerca de este lugar"
+             data-titulo="La Parroquia San Miguel de Uncía"
+             data-fuente="https://mapcarta.com/es/N4673399017">
+            <p>En el corazón de Uncía, capital de la provincia Rafael Bustillo del departamento de Potosí, se levanta la Parroquia de San Miguel: el templo católico que da nombre e identidad religiosa a todo el pueblo. Se encuentra junto a la Plaza 6 de Agosto, muy cerca del Gobierno Autónomo Municipal, y es el punto de referencia espiritual de esta localidad altiplánica, ligada durante generaciones a la minería del estaño. Cada año sus puertas son el punto de partida de la gran fiesta patronal que convierte a Uncía en la Capital Folclórica del departamento de Potosí.</p>
+        </div>
+
+        <div class="dato-vista"
+             data-vista="interior"
+             data-etiqueta="Historia del templo"
+             data-titulo="Un templo que llegó con los mineros"
+             data-fuente="http://revistasbolivianas.ciencia.bo/scielo.php?script=sci_arttext&pid=S1997-44852013000500006&lng=pt&nrm=iso">
+            <p>La devoción al Arcángel Miguel no nació en Uncía: llegó con las familias mineras que emigraron desde el pueblo de Aullagas a comienzos del siglo XX, cuando la época de la plata dio paso al auge del estaño. Los pobladores cuentan que la primera imagen del santo se guardó en una capilla del cerro Juan del Valle, antes de que la comunidad la trasladara y entronizara en la naciente iglesia de Uncía. Desde entonces, el interior del templo —con sus altares menores, costeados por generaciones de devotos y pasantes— guarda la memoria de un pueblo que adoptó a San Miguel como propio.</p>
+        </div>
+
+        <div class="dato-vista"
+             data-vista="altar"
+             data-etiqueta="Fiesta patronal"
+             data-titulo="La fiesta del Arcángel Miguel"
+             data-fuente="http://revistasbolivianas.ciencia.bo/scielo.php?script=sci_arttext&pid=S1997-44852013000500006&lng=pt&nrm=iso">
+            <p>Cada 29 de septiembre, Uncía celebra su fiesta patronal en honor al Arcángel Miguel, una tradición que se remonta a inicios del siglo XX y que en 1973 le valió a la localidad el título de Capital Folclórica del departamento de Potosí. Los preparativos comienzan meses antes, con ensayos, convites, novenas y veladas organizadas por los pasantes, encargados de costear la procesión y los arcos del recorrido. El día central, la imagen del santo recorre las calles antes de presidir el ingreso de más de una decena de fraternidades —Morenada, Diablada, Tundiquis, Waynas, Mineritos, Incas— que bailan su fe ante el pueblo reunido en la Plaza 10 de Noviembre.</p>
+        </div>
+
+        <div class="dato-vista"
+             data-vista="arcangel"
+             data-etiqueta="El Arcángel San Miguel"
+             data-titulo="San Miguel Arcángel"
+             data-fuente="https://es.wikipedia.org/wiki/Arc%C3%A1ngel_Miguel">
+            <p>Su nombre en hebreo —Mikha'el— puede traducirse como "¿quién como Dios?", una pregunta que resume su papel en la tradición cristiana: el de líder de los ejércitos celestiales. La Biblia lo señala como el arcángel que enfrentó y venció a Lucifer, por lo que el arte religioso lo representa casi siempre como un guerrero, espada o lanza en mano, con el dragón vencido a sus pies. La Iglesia católica lo honra como protector de los fieles, defensor de las almas en la hora de la muerte y guardián de la fe, un título que explica por qué comunidades como Uncía lo eligieron como su santo patrono.</p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="script.js?v=2"></script>
+</body>
+</html>
