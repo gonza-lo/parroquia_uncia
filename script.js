@@ -1,23 +1,40 @@
 var scene, camera, renderer, controls;
 
-// --- Control de carga inicial ---
 var totalModelos = 0;
 var modelosCargados = 0;
 var progresoModelos = [];
 var cajasColision = [];
 var escenaLista = false;
 
-// --- Control de vistas / cámara ---
 var animandoCamara = false;
-var RANGO_MOVIMIENTO = 4;   // rango permitido: 5° en horizontal/vertical, 5 unidades en zoom
+var RANGO_MOVIMIENTO = 4;
 
-// --- Modelo cargado bajo demanda ---
 var arcangelCargado = false;
 var modeloArcangel = null;
-var arcangelInteractivo = false; // true mientras se puede arrastrar para girarlo
+var arcangelInteractivo = false;
 
-// --- Vista actual: evita que un botón mueva la cámara si ya está en ese lugar ---
 var vistaActual = 'inicial';
+
+// Luces (se guardan como globales para poder ajustarlas al cambiar de modo)
+var luzAmbiente, luzSol, luzRelleno;
+var modoOscuro = false;
+
+// Intensidades/colores de cada modo. "oscuro" ahora es una noche mucho
+// más cerrada, con casi nada de luz.
+const CONFIG_LUZ = {
+    dia: {
+        ambiente: 0.03,
+        sol: { color: 0xff7a3d, intensidad: 0.3 },
+        relleno: { color: 0x1c2c4a, intensidad: 0.12 },
+        exposicion: 0.5
+    },
+    oscuro: {
+        ambiente: 0.005,
+        sol: { color: 0x0f1524, intensidad: 0.02 },
+        relleno: { color: 0x05080f, intensidad: 0.01 },
+        exposicion: 0.08
+    }
+};
 
 const VISTA_INICIAL = {
     pos: { x: -75, y: 20, z: 10 },
@@ -38,7 +55,8 @@ const VISTA_ARCANGEL = {
     distanciaCamara: 14,
     fraccionPantalla: 0.82,
     rotacionBase: Math.PI / -2,
-    ajusteVertical: -0.5
+    ajusteVertical: -0.5,
+    fraccionLateral: 0
 };
 
 function cargarInfoVistas() {
@@ -59,54 +77,59 @@ function cargarInfoVistas() {
 const INFO_VISTAS = cargarInfoVistas();
 
 function init() {
-    // Escena
     scene = new THREE.Scene();
-
-    // Cámara
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(VISTA_INICIAL.pos.x, VISTA_INICIAL.pos.y, VISTA_INICIAL.pos.z);
-
-    // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-
-    // --- Color management: esto hace que los colores se vean como en Blender ---
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
-
-    // --- Sombras: sin esto, castShadow/receiveShadow en los modelos no hacen nada ---
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     document.getElementById('contenedor3D').appendChild(renderer.domElement);
 
-    // Controles de órbita
     init_controls();
 
-    // Luces + entorno de reflejos (aquí es donde el oro empieza a brillar de verdad)
     setupIluminacion();
+    aplicarModoIluminacion('dia');
 
-    // Fondo de la escena
     cargarFondo("fotos/cielo.jpg");
-
-    // --- Cargar modelos iniciales ---
+    createPiso();
+    
     cargarModelo("modelos3d/iglesia_uncia.glb", 0, 0, 0, 1, 1, 1, 0, false);
     cargarModelo("modelos3d/cura2.glb", -10, 3.3, 0, 5, 5, 5, Math.PI / -2, false);
     cargarModelo("modelos3d/arcangelop.glb", 0, 9, 0, 2, 2, 2, Math.PI / -2, false);
+    cargarModelo("modelos3d/angel.glb", 0, 7, 3, 1.5, 1.5, 1.5, Math.PI / -2, false);
+    cargarModelo("modelos3d/angel.glb", 0, 7, -3, 1.5, 1.5, 1.5, Math.PI / 2, false);
 
     init_botones();
-
+    init_botones_modo();
     init_arcangel_giro();
-
-    init_panel_info();
-
     init_paneles_flotantes();
 
-    // Reajustar tamaño al redimensionar la ventana
     window.addEventListener('resize', onWindowResize);
 }
+function createPiso() {
+    const geometry = new THREE.CircleGeometry(300, 300);
+    geometry.rotateX(-Math.PI / 2);
 
+    const textureLoader = new THREE.TextureLoader();
+    const texturaPasto = textureLoader.load('fotos/textura_pasto.jpg');
+
+    // Repetir la textura para que no se vea estirada en un círculo tan grande
+    texturaPasto.wrapS = THREE.RepeatWrapping;
+    texturaPasto.wrapT = THREE.RepeatWrapping;
+    texturaPasto.repeat.set(50, 50); // ajusta este valor según el tamaño/detalle que quieras
+
+    const material = new THREE.MeshStandardMaterial({ map: texturaPasto });
+
+    const floorMesh = new THREE.Mesh(geometry, material);
+    floorMesh.receiveShadow = true;
+    floorMesh.position.set(0, -2.8, 0);
+    scene.add(floorMesh);
+}
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -257,8 +280,6 @@ function ocultarPantallaCarga() {
         if (contenedor) contenedor.classList.add('visible');
         if (panelBotones) panelBotones.classList.add('visible');
 
-        // Nada más terminar de cargar, se muestra la información
-        // general de la parroquia en el panel inferior.
         mostrarInfo('inicio');
 
         overlay.addEventListener('transitionend', function () {
@@ -268,8 +289,16 @@ function ocultarPantallaCarga() {
 }
 
 // ==========================================================
-// PANEL INFERIOR DE INFORMACIÓN
+// PANEL DE INFORMACIÓN (lateral, fijo)
 // ==========================================================
+// Lado de la pantalla donde aparece el panel según la vista activa.
+const POSICION_INFO = {
+    inicio: 'panel-derecha',
+    interior: 'panel-izquierda',
+    altar: 'panel-derecha',
+    arcangel: 'panel-izquierda'
+};
+
 function mostrarInfo(clave) {
     const datos = INFO_VISTAS[clave];
     if (!datos) return;
@@ -288,40 +317,23 @@ function mostrarInfo(clave) {
     fuente.href = datos.fuente;
 
     panel.classList.add('visible');
-    panel.classList.remove('colapsado'); // al cambiar de vista, se vuelve a abrir
+    panel.classList.remove('panel-derecha', 'panel-izquierda');
+    panel.classList.add(POSICION_INFO[clave] || 'panel-derecha');
 
     // Si el panel tiene scroll de una vista anterior, lo regresamos arriba
     const scroll = panel.querySelector('.panel-info-scroll');
     if (scroll) scroll.scrollTop = 0;
 }
 
-function init_panel_info() {
-    const toggle = document.getElementById('panel-info-toggle');
-    const panel = document.getElementById('panel-info');
-    if (toggle && panel) {
-        toggle.addEventListener('click', function () {
-            panel.classList.toggle('colapsado');
-        });
-    }
-}
-
 // ==========================================================
 // PANELES "DESARROLLADO POR" Y "UBICACIÓN"
 // ==========================================================
-// El contenido de ambos paneles (foto, nombre, redes, mapa, etc.)
-// vive en desarrollador.html. Aquí solo se descarga con fetch() una
-// vez -ya que un solo archivo trae los dos paneles- y se inyecta
-// dentro de #contenedor-desarrollador, para que aparezcan como
-// paneles flotantes sobre la escena 3D sin salir nunca de esta página.
 var panelesCargados = false;
 
 function init_paneles_flotantes() {
     const btnDesarrollador = document.getElementById('btn-desarrollador');
     const btnUbicacion = document.getElementById('btn-ubicacion');
 
-    // Los dos paneles ya están incluidos en index.html. La versión anterior
-    // esperaba un elemento #contenedor-desarrollador que ya no existe y salía
-    // aquí antes de registrar los eventos de ambos botones.
     const panelDesarrollador = document.getElementById('panel-desarrollador');
     const panelUbicacion = document.getElementById('panel-ubicacion');
     if (!panelDesarrollador && !panelUbicacion) return;
@@ -359,9 +371,6 @@ function ocultarPanelesFlotantes() {
     ocultarPanel('panel-ubicacion');
 }
 
-// Se llama una sola vez, justo después de inyectar desarrollador.html,
-// para conectar -en CADA panel presente- el botón de cerrar y el
-// clic fuera de la tarjeta, además de la tecla Escape para los dos.
 function configurarCierrePaneles() {
     ['panel-desarrollador', 'panel-ubicacion'].forEach(function (id) {
         const panel = document.getElementById(id);
@@ -390,7 +399,7 @@ function init_controls() {
     controls.dampingFactor = 0.05;
     controls.enableZoom = true;
     controls.enablePan = false;
-    controls.autoRotate = false; // desactivado: con un rango de solo 5° no se ve bien la autorotación
+    controls.autoRotate = false;
 
     controls.update();
     actualizarLimitesControles();
@@ -483,7 +492,6 @@ function moverCamara(posDestino, targetDestino, duracion) {
         } else {
             animandoCamara = false;
             controls.enabled = true;
-            // Recién ahora, con la cámara ya en el destino final, aplicamos el rango ±5
             actualizarLimitesControles();
         }
     }
@@ -533,12 +541,11 @@ function init_botones() {
 
     if (btnAltar) {
         btnAltar.addEventListener('click', function () {
-            ocultarArcangel(); // al cambiar de vista, el modelo del arcángel desaparece
+            ocultarArcangel();
 
-            mostrarInfo('altar'); // el texto se actualiza aunque ya estemos en esta vista
+            mostrarInfo('altar'); 
 
-            if (vistaActual === 'altar') return; // ya está en esta vista, no se mueve la cámara
-
+            if (vistaActual === 'altar') return; 
             vistaActual = 'altar';
             moverCamara(
                 new THREE.Vector3(VISTA_ALTAR.pos.x, VISTA_ALTAR.pos.y, VISTA_ALTAR.pos.z),
@@ -568,9 +575,7 @@ function init_botones() {
                     if (modelo) {
                         modeloArcangel = modelo;
                         arcangelCargado = true;
-                        // Con el modelo ya cargado se conoce su tamaño real:
-                        // calculamos la distancia que hace que ocupe casi
-                        // toda la pantalla, una sola vez.
+
                         VISTA_ARCANGEL.distanciaCamara = calcularDistanciaArcangel(modelo);
                         mostrarArcangel();
                     } else {
@@ -582,9 +587,6 @@ function init_botones() {
     }
 }
 
-// Muestra el modelo del Arcángel: lo hace visible, lo ubica frente a
-// la cámara y desactiva la órbita de la cámara principal para dejar
-// el arrastre libre exclusivamente para girar el modelo.
 function mostrarArcangel() {
     if (!modeloArcangel) return;
 
@@ -598,9 +600,6 @@ function mostrarArcangel() {
     renderer.domElement.style.cursor = 'grab';
 }
 
-// Oculta el modelo del Arcángel (si ya fue cargado) sin eliminarlo de
-// la escena, para que reaparecer con el botón sea instantáneo, y
-// devuelve el control de la cámara a la órbita normal.
 function ocultarArcangel() {
     if (modeloArcangel) {
         modeloArcangel.visible = false;
@@ -610,10 +609,6 @@ function ocultarArcangel() {
     renderer.domElement.style.cursor = '';
 }
 
-// Calcula la distancia a la que hay que ubicar el modelo frente a la
-// cámara para que ocupe VISTA_ARCANGEL.fraccionPantalla de la altura
-// de pantalla, según el tamaño REAL del modelo cargado (no un número
-// fijo a ojo, que se ve distinto según el archivo .glb que se use).
 function calcularDistanciaArcangel(modelo) {
     modelo.updateMatrixWorld(true);
     const caja = new THREE.Box3().setFromObject(modelo);
@@ -626,20 +621,28 @@ function calcularDistanciaArcangel(modelo) {
     return distancia;
 }
 
-// Coloca el modelo del Arcángel siempre frente a la cámara, a la
-// distancia definida en VISTA_ARCANGEL.distanciaCamara, para que se
-// vea centrado en pantalla sin importar hacia dónde esté mirando la
-// cámara en ese momento (no depende de una posición fija del mundo).
+function calcularDesplazamientoLateralArcangel(distancia) {
+    const fovVertical = THREE.MathUtils.degToRad(camera.fov);
+    const alturaVisible = 2 * Math.tan(fovVertical / 2) * distancia;
+    const anchoVisible = alturaVisible * camera.aspect;
+    return anchoVisible * VISTA_ARCANGEL.fraccionLateral;
+}
+
 function posicionarArcangelFrenteCamara() {
     if (!modeloArcangel) return;
 
     const direccion = new THREE.Vector3();
     camera.getWorldDirection(direccion);
 
+    // Vector "derecha" real de la cámara, tomado de su matriz de mundo.
+    const derechaCamara = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+
+    const desplazamiento = calcularDesplazamientoLateralArcangel(VISTA_ARCANGEL.distanciaCamara);
 
     modeloArcangel.position
         .copy(camera.position)
-        .addScaledVector(direccion, VISTA_ARCANGEL.distanciaCamara);
+        .addScaledVector(direccion, VISTA_ARCANGEL.distanciaCamara)
+        .addScaledVector(derechaCamara, -desplazamiento); // negativo: hacia la izquierda de la pantalla
     modeloArcangel.position.y += VISTA_ARCANGEL.ajusteVertical;
 }
 
@@ -662,42 +665,83 @@ function cargarFondo(archivo) {
 }
 
 function setupIluminacion() {
-    // Luz ambiental que llena las sombras con un tono frío arriba
-    // y cálido abajo (simula luz de cielo + rebote del suelo).
-    const ambiente = new THREE.HemisphereLight(0xdfe9f5, 0x3a2f1e, 1.1);
-    scene.add(ambiente);
+    luzAmbiente = new THREE.HemisphereLight(0xdfe9f5, 0x3a2f1e, 0.1);
+    scene.add(luzAmbiente);
 
-    // Luz principal ("sol"): la única que proyecta sombras.
-    const sol = new THREE.DirectionalLight(0xfff4e0, 2.4);
-    sol.position.set(40, 60, 30);
-    sol.castShadow = true;
-    sol.shadow.mapSize.set(2048, 2048);
-    sol.shadow.camera.left = -60;
-    sol.shadow.camera.right = 60;
-    sol.shadow.camera.top = 60;
-    sol.shadow.camera.bottom = -60;
-    sol.shadow.camera.near = 1;
-    sol.shadow.camera.far = 200;
-    sol.shadow.bias = -0.0015;
-    scene.add(sol);
+    luzSol = new THREE.DirectionalLight(0xfff4e0, 2);
+    luzSol.position.set(40, 60, 30);
+    luzSol.castShadow = true;
+    luzSol.shadow.mapSize.set(2048, 2048);
+    luzSol.shadow.camera.left = -60;
+    luzSol.shadow.camera.right = 60;
+    luzSol.shadow.camera.top = 60;
+    luzSol.shadow.camera.bottom = -60;
+    luzSol.shadow.camera.near = 1;
+    luzSol.shadow.camera.far = 200;
+    luzSol.shadow.bias = -0.0015;
+    scene.add(luzSol);
 
-    // Luz de relleno, suave y sin sombra, para no dejar el lado
-    // opuesto al sol completamente negro.
-    const relleno = new THREE.DirectionalLight(0xbcd2ff, 0.5);
-    relleno.position.set(-30, 20, -30);
-    scene.add(relleno);
+    luzRelleno = new THREE.DirectionalLight(0xbcd2ff, 0.5);
+    luzRelleno.position.set(-30, 20, -30);
+    scene.add(luzRelleno);
 
-    // Entorno PMREM: le da a los materiales metálicos (dorados,
-    // pátinas, vidrio) algo que reflejar. Sin esto, un material
-    // "gold" con metalness alto se ve gris apagado en vez de brillar.
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     scene.environment = pmremGenerator.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
     pmremGenerator.dispose();
 }
 
 // ==========================================================
-// LOOP PRINCIPAL
+// MODO DÍA / MODO OSCURO (fondo + iluminación tipo atardecer)
 // ==========================================================
+function aplicarModoIluminacion(modo) {
+    const cfg = CONFIG_LUZ[modo];
+    if (!cfg || !luzSol || !luzAmbiente || !luzRelleno) return;
+
+    luzAmbiente.intensity = cfg.ambiente;
+
+    luzSol.color.setHex(cfg.sol.color);
+    luzSol.intensity = cfg.sol.intensidad;
+
+    luzRelleno.color.setHex(cfg.relleno.color);
+    luzRelleno.intensity = cfg.relleno.intensidad;
+
+    renderer.toneMappingExposure = cfg.exposicion;
+}
+
+function activarModoDia() {
+    if (!modoOscuro) return;
+    modoOscuro = false;
+
+    aplicarModoIluminacion('dia');
+    actualizarBotonesModo();
+}
+
+function activarModoOscuro() {
+    if (modoOscuro) return;
+    modoOscuro = true;
+
+    aplicarModoIluminacion('oscuro');
+    actualizarBotonesModo();
+}
+
+function actualizarBotonesModo() {
+    const btnDia = document.getElementById('btn-modo-dia');
+    const btnNoche = document.getElementById('btn-modo-noche');
+
+    if (btnDia) btnDia.classList.toggle('activo', !modoOscuro);
+    if (btnNoche) btnNoche.classList.toggle('activo', modoOscuro);
+}
+
+function init_botones_modo() {
+    const btnDia = document.getElementById('btn-modo-dia');
+    const btnNoche = document.getElementById('btn-modo-noche');
+
+    if (btnDia) btnDia.addEventListener('click', activarModoDia);
+    if (btnNoche) btnNoche.addEventListener('click', activarModoOscuro);
+
+    actualizarBotonesModo();
+}
+
 function animate() {
     requestAnimationFrame(animate);
     if (modeloArcangel && modeloArcangel.visible) {

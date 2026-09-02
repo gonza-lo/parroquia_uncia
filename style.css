@@ -1,13 +1,9 @@
 :root {
-    /* Altura del panel de información y separación respecto al borde
-       inferior. Están aquí (y no dentro de #panel-info) porque el
-       panel de botones también las necesita para ubicarse siempre
-       debajo del panel, sin taparlo. */
-    --alto-panel: 48vh;
-    --separacion-panel: 1.25rem;
     /* Espacio reservado para la fila de botones de navegación, pegada
-       al borde inferior; el panel de información se apila justo encima. */
+       al borde inferior, usado para que el panel lateral de
+       información no se superponga con ella. */
     --altura-botones: 4.75rem;
+    --margen-lateral-panel: 2rem;
 }
 
 * {
@@ -136,6 +132,61 @@ html, body {
     letter-spacing: 0.05em;
 }
 
+/* ---------- Degradado superior (negro a transparente) ---------- */
+
+#degradado-superior {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 200px;
+    z-index: 5;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0.35) 45%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* ---------- Botones circulares: modo día / modo oscuro ---------- */
+
+.boton-modo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    border-radius: 50%;
+
+    background: rgba(10, 14, 20, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(201, 162, 75, 0.5);
+
+    color: #f4f1ea;
+    cursor: pointer;
+    transition: background 0.25s ease, border-color 0.25s ease, transform 0.15s ease, color 0.25s ease;
+}
+
+.boton-modo svg {
+    width: 1.15rem;
+    height: 1.15rem;
+}
+
+.boton-modo:hover {
+    background: rgba(201, 162, 75, 0.18);
+    border-color: #e8c97a;
+    transform: translateY(-2px);
+}
+
+.boton-modo:active {
+    transform: translateY(0);
+}
+
+.boton-modo.activo {
+    background: #c9a24b;
+    border-color: #c9a24b;
+    color: #0a0e14;
+}
+
 /* ---------- Título del sitio (arriba a la izquierda) ---------- */
 
 #sitio-titulo {
@@ -187,77 +238,50 @@ html, body {
 
 #panel-info {
     position: fixed;
-    left: 50%;
-    /* Apilado justo encima del panel de botones, que queda pegado abajo. */
-    bottom: calc(var(--altura-botones) + var(--separacion-panel));
-    width: 100%;
-    max-width: 640px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: min(380px, 88vw);
+    max-height: calc(100vh - var(--altura-botones) - 6rem);
     z-index: 12;
 
-    background: rgba(10, 14, 20, 0.72);
+    /* Posición horizontal por defecto; se sobreescribe con
+       .panel-derecha / .panel-izquierda según la vista activa. */
+    right: var(--margen-lateral-panel);
+
+    background: rgba(10, 14, 20, 0.78);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(201, 162, 75, 0.35);
+    border: 2px solid #c9a24b;
     border-radius: 14px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(201, 162, 75, 0.25);
+    overflow: hidden;
 
     opacity: 0;
     pointer-events: none;
-    transform: translate(-50%, 20px);
-    transition: opacity 0.7s ease, transform 0.7s ease, bottom 0.45s ease;
+    transition: opacity 0.6s ease;
 }
 
-/* Se activa por JS cuando ya hay contenido cargado para mostrar */
+/* Fijo y siempre visible una vez que hay contenido que mostrar
+   (ya no se puede ocultar ni colapsar). */
 #panel-info.visible {
     opacity: 1;
     pointer-events: auto;
-    transform: translate(-50%, 0);
 }
 
-#panel-info-toggle {
-    position: absolute;
-    top: -18px;
-    right: 1.25rem;
-
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: 1px solid rgba(201, 162, 75, 0.5);
-    background: #12161f;
-    color: #c9a24b;
-    font-size: 1rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.4s ease, background 0.25s ease;
+#panel-info.panel-derecha {
+    left: auto;
+    right: var(--margen-lateral-panel);
 }
 
-#panel-info-toggle:hover {
-    background: rgba(201, 162, 75, 0.18);
-}
-
-.panel-info-flecha {
-    transition: transform 0.4s ease;
-}
-
-/* Estado colapsado: el panel se retrae dejando solo el asa visible */
-#panel-info.colapsado .panel-info-scroll {
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    opacity: 0;
-}
-
-#panel-info.colapsado #panel-info-toggle .panel-info-flecha {
-    transform: rotate(180deg);
+#panel-info.panel-izquierda {
+    left: var(--margen-lateral-panel);
+    right: auto;
 }
 
 .panel-info-scroll {
-    max-height: var(--alto-panel);
+    max-height: 100%;
     overflow-y: auto;
     padding: 1.75rem 1.75rem 1.5rem;
-    transition: max-height 0.45s ease, padding 0.45s ease, opacity 0.3s ease;
 }
 
 .panel-info-scroll::-webkit-scrollbar {
@@ -375,10 +399,9 @@ html, body {
 
 @media (max-width: 480px) {
     :root {
-        --alto-panel: 42vh;
-        --separacion-panel: 0.85rem;
         /* Los botones pueden ocupar dos filas en pantallas angostas */
         --altura-botones: 6.5rem;
+        --margen-lateral-panel: 0.85rem;
     }
 
     .carga-titulo {
@@ -406,6 +429,20 @@ html, body {
         font-size: 0.7rem;
     }
 
+    .boton-modo {
+        width: 2.1rem;
+        height: 2.1rem;
+    }
+
+    .boton-modo svg {
+        width: 1rem;
+        height: 1rem;
+    }
+
+    #degradado-superior {
+        height: 140px;
+    }
+
     #sitio-titulo {
         top: 1rem;
         left: 1rem;
@@ -417,8 +454,8 @@ html, body {
     }
 
     #panel-info {
-        width: calc(100% - 1.5rem);
-        max-width: none;
+        width: min(300px, 82vw);
+        max-height: calc(100vh - var(--altura-botones) - 4.5rem);
     }
 
     .panel-info-scroll {

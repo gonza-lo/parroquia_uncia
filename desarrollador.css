@@ -1,9 +1,3 @@
-/* ==========================================================
-   BOTONES SUPERIORES (arriba a la derecha): Ubicación y
-   Desarrollado por. Comparten un mismo contenedor para que se
-   revelen y se acomoden juntos, uno al lado del otro.
-   ========================================================== */
-
 #botones-superiores {
     position: fixed;
     top: 1.5rem;
