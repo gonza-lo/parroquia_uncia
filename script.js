@@ -1,5 +1,13 @@
 var scene, camera, renderer, controls;
 
+const POSICIONES_LAMPARAS = [
+    { x: -14, y: 12.8, z:  0 },
+    { x:  -4, y: 12.8, z:  4 },
+    { x:  -4, y: 12.8, z: -4 },
+    { x: -24, y: 12.8, z:  4 },
+    { x: -24, y: 12.8, z: -4 },
+];
+
 var totalModelos = 0;
 var modelosCargados = 0;
 var progresoModelos = [];
@@ -7,7 +15,7 @@ var cajasColision = [];
 var escenaLista = false;
 
 var animandoCamara = false;
-var RANGO_MOVIMIENTO = 4;
+var RANGO_MOVIMIENTO = 5;
 
 var arcangelCargado = false;
 var modeloArcangel = null;
@@ -18,6 +26,12 @@ var vistaActual = 'inicial';
 // Luces (se guardan como globales para poder ajustarlas al cambiar de modo)
 var luzAmbiente, luzSol, luzRelleno;
 var modoOscuro = false;
+
+// Cielo procedural (THREE.Sky) - globales por si se quieren ajustar luego
+var sky, sol;
+
+// Luces spot de las lámparas araña: solo se encienden en modo oscuro
+var lucesLamparasSpot = [];
 
 // Intensidades/colores de cada modo. "oscuro" ahora es una noche mucho
 // más cerrada, con casi nada de luz.
@@ -68,7 +82,8 @@ function cargarInfoVistas() {
             etiqueta: el.dataset.etiqueta || '',
             titulo: el.dataset.titulo || '',
             texto: parrafo ? parrafo.textContent.trim() : '',
-            fuente: el.dataset.fuente || '#'
+            fuente: el.dataset.fuente || '#',
+            foto: el.dataset.foto || ''
         };
     });
     return datos;
@@ -95,14 +110,24 @@ function init() {
     setupIluminacion();
     aplicarModoIluminacion('dia');
 
-    cargarFondo("fotos/cielo.jpg");
-    createPiso();
-    
+    crearCielo();
+    crearTerreno();
+
     cargarModelo("modelos3d/iglesia_uncia.glb", 0, 0, 0, 1, 1, 1, 0, false);
     cargarModelo("modelos3d/cura2.glb", -10, 3.3, 0, 5, 5, 5, Math.PI / -2, false);
     cargarModelo("modelos3d/arcangelop.glb", 0, 9, 0, 2, 2, 2, Math.PI / -2, false);
     cargarModelo("modelos3d/angel.glb", 0, 7, 3, 1.5, 1.5, 1.5, Math.PI / -2, false);
     cargarModelo("modelos3d/angel.glb", 0, 7, -3, 1.5, 1.5, 1.5, Math.PI / 2, false);
+
+    cargarModelo("modelos3d/arbol.glb", -70, 1, -10, 2, 2, 2, 0, false);
+    POSICIONES_LAMPARAS.forEach(function (pos) {
+        cargarModelo("modelos3d/lampara_araña.glb", pos.x, pos.y, pos.z, 1, 1, 1, 0);
+    });
+
+    const luzLampara1 = push_spot_light(0xFFFFFF, 10, 50, 60, -28, 12.8, 0);
+    const luzLampara2 = push_spot_light(0xFFFFFF, 10, 50, 60, -8, 12.8, 0);
+    lucesLamparasSpot.push(luzLampara1, luzLampara2);
+    actualizarLucesLamparas();
 
     init_botones();
     init_botones_modo();
@@ -111,25 +136,129 @@ function init() {
 
     window.addEventListener('resize', onWindowResize);
 }
-function createPiso() {
-    const geometry = new THREE.CircleGeometry(300, 300);
-    geometry.rotateX(-Math.PI / 2);
+function push_spot_light(color, intensity, distancia, angulo, px, py, pz) {
+    const light = new THREE.SpotLight(
+        color,
+        intensity,
+        distancia,
+        THREE.MathUtils.degToRad(angulo),
+        0.4, // penumbra, suaviza el borde del cono
+        1    // decay
+    );
+    light.position.set(px, py, pz);
+    light.castShadow = true;
+
+    // Apunta hacia abajo, como si la luz cayera desde la lámpara
+    light.target.position.set(px, py - 10, pz);
+    scene.add(light.target);
+    scene.add(light);
+
+    // Descomenta solo si quieres ver el cono de luz mientras depuras:
+    //const spotLightHelper = new THREE.SpotLightHelper(light);
+    //scene.add(spotLightHelper);
+
+    return light;
+}
+
+// Muestra u oculta las luces de las lámparas según el modo actual
+function actualizarLucesLamparas() {
+    lucesLamparasSpot.forEach(function (luz) {
+        luz.visible = modoOscuro;
+    });
+}
+// ==========================================================
+// TERRENO CON RELIEVE (colinas) + ÁRBOLES ALEATORIOS
+// Sin librerías externas: ruido escrito a mano.
+// ==========================================================
+
+// --- Configuración del relieve ---
+const ALTURA_BASE_TERRENO = -2.8;   // misma altura que tenía el piso plano anterior
+const AMPLITUD_COLINAS = 6;         // qué tan altas son las colinas (unidades del mundo)
+const ESCALA_RUIDO = 0.02;          // más bajo = colinas más anchas/suaves; más alto = más "arrugado"
+const RADIO_ZONA_PLANA = 30;        // radio alrededor del centro que se mantiene 100% plano (iglesia, lámparas, etc.)
+const RADIO_TRANSICION = 60;        // a partir de este radio el relieve ya está al 100%
+
+// Ruido "value noise" con interpolación suave (sin librerías, hecho a mano)
+function ruido2D(x, y) {
+    function hash(px, py) {
+        const s = Math.sin(px * 127.1 + py * 311.7) * 43758.5453123;
+        return s - Math.floor(s);
+    }
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const suave = function (t) { return t * t * (3 - 2 * t); };
+
+    const a = hash(xi, yi);
+    const b = hash(xi + 1, yi);
+    const c = hash(xi, yi + 1);
+    const d = hash(xi + 1, yi + 1);
+
+    const u = suave(xf);
+    const v = suave(yf);
+
+    return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a, b, u), THREE.MathUtils.lerp(c, d, u), v);
+}
+
+// Varias "capas" de ruido superpuestas para que las colinas se vean más naturales
+function ruidoFractal(x, y, octavas) {
+    let total = 0, amplitud = 1, frecuencia = 1, maxValor = 0;
+    for (let i = 0; i < octavas; i++) {
+        total += ruido2D(x * frecuencia, y * frecuencia) * amplitud;
+        maxValor += amplitud;
+        amplitud *= 0.5;
+        frecuencia *= 2;
+    }
+    return total / maxValor; // normalizado entre 0 y 1
+}
+
+// Transición suave entre 0 y 1 (sin depender de THREE.MathUtils.smoothstep por compatibilidad)
+function suavizarEntre(x, borde0, borde1) {
+    if (x <= borde0) return 0;
+    if (x >= borde1) return 1;
+    const t = (x - borde0) / (borde1 - borde0);
+    return t * t * (3 - 2 * t);
+}
+
+// Altura del terreno en cualquier punto (x, z). La usan tanto el mesh del suelo
+// como los árboles, para que ambos coincidan perfectamente.
+function calcularAlturaTerreno(x, z) {
+    const distanciaCentro = Math.sqrt(x * x + z * z);
+    const factorRelieve = suavizarEntre(distanciaCentro, RADIO_ZONA_PLANA, RADIO_TRANSICION);
+    const ruido = ruidoFractal(x * ESCALA_RUIDO, z * ESCALA_RUIDO, 4); // 0..1
+    const desplazamiento = (ruido - 0.5) * 2 * AMPLITUD_COLINAS;       // -AMPLITUD..+AMPLITUD
+    return ALTURA_BASE_TERRENO + desplazamiento * factorRelieve;
+}
+
+function crearTerreno() {
+    const tamano = 600;     // ancho/alto total del terreno
+    const segmentos = 200;  // resolución: más segmentos = colinas más suaves pero más caro
+
+    const geometry = new THREE.PlaneGeometry(tamano, tamano, segmentos, segmentos);
+    geometry.rotateX(-Math.PI / 2); // acostarlo para que quede horizontal
+
+    const posiciones = geometry.attributes.position;
+    for (let i = 0; i < posiciones.count; i++) {
+        const x = posiciones.getX(i);
+        const z = posiciones.getZ(i);
+        posiciones.setY(i, calcularAlturaTerreno(x, z));
+    }
+    geometry.computeVertexNormals();
 
     const textureLoader = new THREE.TextureLoader();
     const texturaPasto = textureLoader.load('fotos/textura_pasto.jpg');
-
-    // Repetir la textura para que no se vea estirada en un círculo tan grande
     texturaPasto.wrapS = THREE.RepeatWrapping;
     texturaPasto.wrapT = THREE.RepeatWrapping;
-    texturaPasto.repeat.set(50, 50); // ajusta este valor según el tamaño/detalle que quieras
+    texturaPasto.repeat.set(60, 60);
 
     const material = new THREE.MeshStandardMaterial({ map: texturaPasto });
 
-    const floorMesh = new THREE.Mesh(geometry, material);
-    floorMesh.receiveShadow = true;
-    floorMesh.position.set(0, -2.8, 0);
-    scene.add(floorMesh);
+    const terrenoMesh = new THREE.Mesh(geometry, material);
+    terrenoMesh.receiveShadow = true;
+    scene.add(terrenoMesh);
+
+    return terrenoMesh;
 }
+
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -308,6 +437,7 @@ function mostrarInfo(clave) {
     const titulo = document.getElementById('panel-info-titulo');
     const texto = document.getElementById('panel-info-texto');
     const fuente = document.getElementById('panel-info-fuente');
+    const foto = document.getElementById('panel-info-foto');
 
     if (!panel) return;
 
@@ -315,6 +445,22 @@ function mostrarInfo(clave) {
     titulo.textContent = datos.titulo;
     texto.textContent = datos.texto;
     fuente.href = datos.fuente;
+    // Se reinserta "Fuente" como parte del mismo párrafo, para que quede
+    // en la última línea del texto en vez de ocupar una fila aparte.
+    texto.appendChild(document.createTextNode(' '));
+    texto.appendChild(fuente);
+
+    // Foto opcional: solo se muestra si la vista tiene una definida (data-foto)
+    if (foto) {
+        if (datos.foto) {
+            foto.src = datos.foto;
+            foto.alt = datos.titulo;
+            foto.hidden = false;
+        } else {
+            foto.hidden = true;
+            foto.src = '';
+        }
+    }
 
     panel.classList.add('visible');
     panel.classList.remove('panel-derecha', 'panel-izquierda');
@@ -647,23 +793,145 @@ function posicionarArcangelFrenteCamara() {
 }
 
 // ==========================================================
-// FONDO Y LUZ
+// CIELO PROCEDURAL (THREE.Sky) - reemplaza a cargarFondo()
 // ==========================================================
-function cargarFondo(archivo) {
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load(
-        archivo,
-        function (texture) {
-            texture.encoding = THREE.sRGBEncoding;
-            scene.background = texture;
-        },
-        undefined,
-        function (error) {
-            console.error('Error cargando el fondo:', error);
-        }
-    );
+function crearCielo() {
+    sky = new THREE.Sky();
+
+    // IMPORTANTE: la cámara tiene "far: 1000", así que el cielo debe quedar
+    // DENTRO de ese rango o la cámara no lo renderiza (queda invisible).
+    const escalaCielo = camera.far * 0.9;
+    sky.scale.setScalar(escalaCielo);
+    scene.add(sky);
+
+    const uniforms = sky.material.uniforms;
+    uniforms['turbidity'].value = 1;          // mínimo = casi sin neblina (antes 4)
+    uniforms['rayleigh'].value = 4;           // más alto = azul más saturado (antes 3)
+    uniforms['mieCoefficient'].value = 0.001; // la neblina (Mie) es la que blanquea el cielo, la bajamos casi a cero
+    uniforms['mieDirectionalG'].value = 0.85;
+
+    sol = new THREE.Vector3();
+
+    // Posición del sol en la bóveda celeste (elevación y azimut en grados)
+    const elevacion = 25;  // más alto que antes, para que se vea bien como esfera
+    const azimut = -160;   // dirección horizontal del sol
+
+    const phi = THREE.MathUtils.degToRad(90 - elevacion);
+    const theta = THREE.MathUtils.degToRad(azimut);
+
+    sol.setFromSphericalCoords(1, phi, theta);
+    uniforms['sunPosition'].value.copy(sol);
+
+    crearSol(escalaCielo);
+    crearNubes(escalaCielo);
 }
 
+// Genera una textura de resplandor circular (radial) por código, sin archivos externos
+function crearTexturaResplandor(colorCentro, colorBorde) {
+    const tam = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = tam;
+    canvas.height = tam;
+    const ctx = canvas.getContext('2d');
+
+    const grad = ctx.createRadialGradient(tam / 2, tam / 2, 0, tam / 2, tam / 2, tam / 2);
+    grad.addColorStop(0, colorCentro);
+    grad.addColorStop(1, colorBorde);
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, tam, tam);
+
+    return new THREE.CanvasTexture(canvas);
+}
+
+// Disco de sol visible, ubicado en la misma dirección que usa el shader del cielo
+function crearSol(escalaCielo) {
+    const textura = crearTexturaResplandor('rgba(255,250,225,1)', 'rgba(255,250,225,0)');
+    const material = new THREE.SpriteMaterial({
+        map: textura,
+        transparent: true,
+        depthWrite: false,
+        depthTest: false // así nunca queda tapado por el domo del cielo
+    });
+
+    const distancia = escalaCielo * 0.4;
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(sol).multiplyScalar(distancia);
+
+    const tamanoSol = distancia * 0.09;
+    sprite.scale.set(tamanoSol, tamanoSol, 1);
+    sprite.renderOrder = 0;
+
+    scene.add(sprite);
+    return sprite;
+}
+
+// Textura de una "nube" individual: varios círculos difusos superpuestos
+function crearTexturaNube() {
+    const tam = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = tam;
+    canvas.height = tam;
+    const ctx = canvas.getContext('2d');
+
+    for (let i = 0; i < 8; i++) {
+        const x = 50 + Math.random() * (tam - 100);
+        const y = 50 + Math.random() * (tam - 100);
+        const r = 35 + Math.random() * 55;
+
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, 'rgba(255,255,255,0.85)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    return new THREE.CanvasTexture(canvas);
+}
+
+// Esparce varias nubes (sprites) en la parte alta del domo del cielo
+function crearNubes(escalaCielo) {
+    const textura = crearTexturaNube();
+    const material = new THREE.SpriteMaterial({
+        map: textura,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+        depthTest: false
+    });
+
+    const grupo = new THREE.Group();
+    const cantidad = 20;
+    const distancia = escalaCielo * 0.3;
+
+    for (let i = 0; i < cantidad; i++) {
+        const sprite = new THREE.Sprite(material);
+
+        const angulo = Math.random() * Math.PI * 2;
+        const alturaAngulo = THREE.MathUtils.degToRad(8 + Math.random() * 35);
+
+        const x = distancia * Math.cos(alturaAngulo) * Math.cos(angulo);
+        const y = distancia * Math.sin(alturaAngulo);
+        const z = distancia * Math.cos(alturaAngulo) * Math.sin(angulo);
+
+        sprite.position.set(x, y, z);
+
+        const escala = distancia * (0.15 + Math.random() * 0.15);
+        sprite.scale.set(escala, escala * 0.55, 1);
+
+        grupo.add(sprite);
+    }
+
+    scene.add(grupo);
+    return grupo;
+}
+
+// ==========================================================
+// LUZ AMBIENTAL / DIRECCIONAL
+// ==========================================================
 function setupIluminacion() {
     luzAmbiente = new THREE.HemisphereLight(0xdfe9f5, 0x3a2f1e, 0.1);
     scene.add(luzAmbiente);
@@ -713,6 +981,7 @@ function activarModoDia() {
     modoOscuro = false;
 
     aplicarModoIluminacion('dia');
+    actualizarLucesLamparas();
     actualizarBotonesModo();
 }
 
@@ -721,6 +990,7 @@ function activarModoOscuro() {
     modoOscuro = true;
 
     aplicarModoIluminacion('oscuro');
+    actualizarLucesLamparas();
     actualizarBotonesModo();
 }
 

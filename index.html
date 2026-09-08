@@ -131,9 +131,9 @@
     <!-- Panel de botones de navegación -->
     <div id="panel-botones">
         <button id="btn-inicio" class="boton-nav">INICIO</button>
-        <button id="btn-interior" class="boton-nav">VER INTERIOR</button>
-        <button id="btn-altar" class="boton-nav">VER ALTAR</button>
-        <button id="btn-arcangel" class="boton-nav">VER ARCÁNGEL SAN MIGUEL</button>
+        <button id="btn-interior" class="boton-nav">HISTORIA</button>
+        <button id="btn-altar" class="boton-nav">FIESTA PATRONAL</button>
+        <button id="btn-arcangel" class="boton-nav">ARCÁNGEL SAN MIGUEL</button>
     </div>
 
     <!-- Panel inferior de información: cambia de contenido según la vista activa -->
@@ -143,6 +143,7 @@
             <h2 id="panel-info-titulo" class="panel-info-titulo"></h2>
             <p id="panel-info-texto" class="panel-info-texto"></p>
             <a id="panel-info-fuente" class="panel-info-fuente" href="#" target="_blank" rel="noopener noreferrer">Fuente ↗</a>
+            <img id="panel-info-foto" class="panel-info-foto" src="" alt="" hidden>
         </div>
     </div>
 
@@ -154,7 +155,8 @@
              data-vista="inicio"
              data-etiqueta="Acerca de este lugar"
              data-titulo="La Parroquia San Miguel de Uncía"
-             data-fuente="https://mapcarta.com/es/N4673399017">
+             data-fuente="https://mapcarta.com/es/N4673399017"
+             data-foto="fotos/exterior.jpeg">
             <p>En el corazón de Uncía, capital de la provincia Rafael Bustillo del departamento de Potosí, se levanta la Parroquia de San Miguel: el templo católico que da nombre e identidad religiosa a todo el pueblo. Se encuentra junto a la Plaza 6 de Agosto, muy cerca del Gobierno Autónomo Municipal, y es el punto de referencia espiritual de esta localidad altiplánica, ligada durante generaciones a la minería del estaño. Cada año sus puertas son el punto de partida de la gran fiesta patronal que convierte a Uncía en la Capital Folclórica del departamento de Potosí.</p>
         </div>
 
@@ -162,7 +164,8 @@
              data-vista="interior"
              data-etiqueta="Historia del templo"
              data-titulo="Un templo que llegó con los mineros"
-             data-fuente="http://revistasbolivianas.ciencia.bo/scielo.php?script=sci_arttext&pid=S1997-44852013000500006&lng=pt&nrm=iso">
+             data-fuente="http://revistasbolivianas.ciencia.bo/scielo.php?script=sci_arttext&pid=S1997-44852013000500006&lng=pt&nrm=iso"
+             data-foto="fotos/interior.jpg">
             <p>La devoción al Arcángel Miguel no nació en Uncía: llegó con las familias mineras que emigraron desde el pueblo de Aullagas a comienzos del siglo XX, cuando la época de la plata dio paso al auge del estaño. Los pobladores cuentan que la primera imagen del santo se guardó en una capilla del cerro Juan del Valle, antes de que la comunidad la trasladara y entronizara en la naciente iglesia de Uncía. Desde entonces, el interior del templo —con sus altares menores, costeados por generaciones de devotos y pasantes— guarda la memoria de un pueblo que adoptó a San Miguel como propio.</p>
         </div>
 
@@ -170,15 +173,17 @@
              data-vista="altar"
              data-etiqueta="Fiesta patronal"
              data-titulo="La fiesta del Arcángel Miguel"
-             data-fuente="http://revistasbolivianas.ciencia.bo/scielo.php?script=sci_arttext&pid=S1997-44852013000500006&lng=pt&nrm=iso">
-            <p>Cada 29 de septiembre, Uncía celebra su fiesta patronal en honor al Arcángel Miguel, una tradición que se remonta a inicios del siglo XX y que en 1973 le valió a la localidad el título de Capital Folclórica del departamento de Potosí. Los preparativos comienzan meses antes, con ensayos, convites, novenas y veladas organizadas por los pasantes, encargados de costear la procesión y los arcos del recorrido. El día central, la imagen del santo recorre las calles antes de presidir el ingreso de más de una decena de fraternidades —Morenada, Diablada, Tundiquis, Waynas, Mineritos, Incas— que bailan su fe ante el pueblo reunido en la Plaza 10 de Noviembre.</p>
+             data-fuente="http://revistasbolivianas.ciencia.bo/scielo.php?script=sci_arttext&pid=S1997-44852013000500006&lng=pt&nrm=iso"
+             data-foto="fotos/interior.jpg">
+             <p>Cada 29 de septiembre, Uncía celebra su fiesta patronal en honor al Arcángel Miguel, una tradición que se remonta a inicios del siglo XX y que en 1973 le valió a la localidad el título de Capital Folclórica del departamento de Potosí. Los preparativos comienzan meses antes, con ensayos, convites, novenas y veladas organizadas por los pasantes, encargados de costear la procesión y los arcos del recorrido. El día central, la imagen del santo recorre las calles antes de presidir el ingreso de más de una decena de fraternidades —Morenada, Diablada, Tundiquis, Waynas, Mineritos, Incas— que bailan su fe ante el pueblo reunido en la Plaza 10 de Noviembre.</p>
         </div>
 
         <div class="dato-vista"
              data-vista="arcangel"
              data-etiqueta="El Arcángel San Miguel"
              data-titulo="San Miguel Arcángel"
-             data-fuente="https://es.wikipedia.org/wiki/Arc%C3%A1ngel_Miguel">
+             data-fuente="https://es.wikipedia.org/wiki/Arc%C3%A1ngel_Miguel"
+             data-foto="fotos/arcangel.png">
             <p>Su nombre en hebreo —Mikha'el— puede traducirse como "¿quién como Dios?", una pregunta que resume su papel en la tradición cristiana: el de líder de los ejércitos celestiales. La Biblia lo señala como el arcángel que enfrentó y venció a Lucifer, por lo que el arte religioso lo representa casi siempre como un guerrero, espada o lanza en mano, con el dragón vencido a sus pies. La Iglesia católica lo honra como protector de los fieles, defensor de las almas en la hora de la muerte y guardián de la fe, un título que explica por qué comunidades como Uncía lo eligieron como su santo patrono.</p>
         </div>
     </div>
@@ -187,6 +192,7 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Sky.js"></script>
     <script src="script.js?v=2"></script>
 </body>
 </html>

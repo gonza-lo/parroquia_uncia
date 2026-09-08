@@ -23,64 +23,39 @@
 }
 
 .boton-desarrollador {
-    position: relative;
-    min-height: 2.75rem;
-    padding: 0.72rem 1.2rem;
-    overflow: hidden;
+    padding: 0.75rem 1.5rem;
+    background: var(--color-fondo-panel, #ffffff);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--color-dorado, #c9a24b);
+    border-radius: 999px;
 
-    background: linear-gradient(135deg, rgba(28, 34, 45, 0.88), rgba(10, 14, 20, 0.72));
-    backdrop-filter: blur(14px) saturate(135%);
-    -webkit-backdrop-filter: blur(14px) saturate(135%);
-    border: 1px solid rgba(232, 201, 122, 0.42);
-    border-radius: 0.8rem;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-
-    color: #f8f3e8;
+    color: var(--color-dorado-oscuro, #8a6a1f);
     font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.09em;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
     line-height: 1;
     text-transform: uppercase;
     cursor: pointer;
     white-space: nowrap;
 
-    transition: color 0.25s ease, background 0.25s ease, border-color 0.25s ease,
-        box-shadow 0.25s ease, transform 0.25s ease;
-}
-
-/* Brillo sutil que aparece al pasar el cursor */
-.boton-desarrollador::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.14) 50%, transparent 75%);
-    transform: translateX(-120%);
-    transition: transform 0.5s ease;
-    pointer-events: none;
+    transition: background 0.25s ease, border-color 0.25s ease, transform 0.15s ease;
 }
 
 .boton-desarrollador:hover {
-    color: #fff9e8;
-    background: linear-gradient(135deg, rgba(112, 82, 35, 0.9), rgba(42, 32, 20, 0.9));
-    border-color: rgba(248, 220, 142, 0.95);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3), 0 0 0 3px rgba(201, 162, 75, 0.12),
-        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    background: #fdf6e8;
+    border-color: var(--color-dorado, #c9a24b);
     transform: translateY(-2px);
 }
 
-.boton-desarrollador:hover::after {
-    transform: translateX(120%);
-}
-
 .boton-desarrollador:focus-visible {
-    outline: 3px solid rgba(248, 220, 142, 0.65);
+    outline: 3px solid rgba(201, 162, 75, 0.45);
     outline-offset: 3px;
 }
 
 .boton-desarrollador:active {
     transform: translateY(0);
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.24), inset 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 @media (max-width: 600px) {
@@ -94,10 +69,8 @@
     }
 
     .boton-desarrollador {
-        min-height: 2.45rem;
-        padding: 0.65rem 0.85rem;
-        font-size: 0.63rem;
-        letter-spacing: 0.06em;
+        padding: 0.6rem 1rem;
+        font-size: 0.7rem;
     }
 }
 
