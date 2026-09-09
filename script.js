@@ -123,7 +123,7 @@ function init() {
     cargarModeloFBX('modelos3d/militar.fbx', -40, 3.3, -12, 0.2, 0.2, 0.2);
 
     POSICIONES_LAMPARAS.forEach(function (pos) {
-        cargarModelo("modelos3d/lampara_araña.glb", pos.x, pos.y, pos.z, 1, 1, 1, 0);
+        cargarModelo("modelos3d/lampara.glb", pos.x, pos.y, pos.z, 1, 1, 1, 0);
     });
 
     const luzLampara1 = push_spot_light(0xFFFFFF, 10, 50, 60, -28, 12.8, 0);
