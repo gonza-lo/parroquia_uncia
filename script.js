@@ -1,5 +1,8 @@
 var scene, camera, renderer, controls;
 
+var mixers = [];
+var clockAnimaciones = new THREE.Clock();
+
 const POSICIONES_LAMPARAS = [
     { x: -14, y: 12.8, z:  0 },
     { x:  -4, y: 12.8, z:  4 },
@@ -15,7 +18,8 @@ var cajasColision = [];
 var escenaLista = false;
 
 var animandoCamara = false;
-var RANGO_MOVIMIENTO = 5;
+var RANGO_MOVIMIENTO_HORIZONTAL = 20;
+var RANGO_MOVIMIENTO_VERTICAL = 4;
 
 var arcangelCargado = false;
 var modeloArcangel = null;
@@ -23,18 +27,13 @@ var arcangelInteractivo = false;
 
 var vistaActual = 'inicial';
 
-// Luces (se guardan como globales para poder ajustarlas al cambiar de modo)
 var luzAmbiente, luzSol, luzRelleno;
 var modoOscuro = false;
 
-// Cielo procedural (THREE.Sky) - globales por si se quieren ajustar luego
-var sky, sol;
+var sol;
 
-// Luces spot de las lámparas araña: solo se encienden en modo oscuro
 var lucesLamparasSpot = [];
 
-// Intensidades/colores de cada modo. "oscuro" ahora es una noche mucho
-// más cerrada, con casi nada de luz.
 const CONFIG_LUZ = {
     dia: {
         ambiente: 0.03,
@@ -113,13 +112,16 @@ function init() {
     crearCielo();
     crearTerreno();
 
-    cargarModelo("modelos3d/iglesia_uncia.glb", 0, 0, 0, 1, 1, 1, 0, false);
+    cargarModelo("modelos3d/iglesia.glb", 0, 0, 0, 1, 1, 1, 0, false);
     cargarModelo("modelos3d/cura2.glb", -10, 3.3, 0, 5, 5, 5, Math.PI / -2, false);
     cargarModelo("modelos3d/arcangelop.glb", 0, 9, 0, 2, 2, 2, Math.PI / -2, false);
-    cargarModelo("modelos3d/angel.glb", 0, 7, 3, 1.5, 1.5, 1.5, Math.PI / -2, false);
-    cargarModelo("modelos3d/angel.glb", 0, 7, -3, 1.5, 1.5, 1.5, Math.PI / 2, false);
+    cargarModelo("modelos3d/angl.glb", 0, 7, 3, 1.5, 1.5, 1.5, Math.PI / -2, false);
+    cargarModelo("modelos3d/angl.glb", 0, 7, -3, 1.5, 1.5, 1.5, Math.PI / 2, false);
 
     cargarModelo("modelos3d/arbol.glb", -70, 1, -10, 2, 2, 2, 0, false);
+
+    cargarModeloFBX('modelos3d/militar.fbx', -40, 3.3, -12, 0.2, 0.2, 0.2);
+
     POSICIONES_LAMPARAS.forEach(function (pos) {
         cargarModelo("modelos3d/lampara_araña.glb", pos.x, pos.y, pos.z, 1, 1, 1, 0);
     });
@@ -136,49 +138,83 @@ function init() {
 
     window.addEventListener('resize', onWindowResize);
 }
+
+// Carga un FBX y reproduce su animación si trae alguna
+function cargarModeloFBX(archivo, x, y, z, l, m, n) {
+    x = (x !== undefined) ? x : 0;
+    y = (y !== undefined) ? y : 0;
+    z = (z !== undefined) ? z : 0;
+    l = (l !== undefined) ? l : 1;
+    m = (m !== undefined) ? m : 1;
+    n = (n !== undefined) ? n : 1;
+
+    const loader = new THREE.FBXLoader();
+    loader.load(
+        archivo,
+        function (modelo) {
+            modelo.scale.set(l, m, n);
+            modelo.position.set(x, y, z);
+
+            modelo.traverse(function (child) {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+
+                if (child.isLight) {
+                    child.intensity *= 0;
+                }
+            });
+
+            if (modelo.animations && modelo.animations.length > 0) {
+                const mixer = new THREE.AnimationMixer(modelo);
+                const accion = mixer.clipAction(modelo.animations[0]);
+                accion.play();
+                mixers.push(mixer);
+            }
+
+            scene.add(modelo);
+            console.log('Modelo FBX cargado correctamente:', archivo);
+        },
+        undefined,
+        function (error) {
+            console.error('❌ Error al cargar el FBX:', error);
+        }
+    );
+}
+
 function push_spot_light(color, intensity, distancia, angulo, px, py, pz) {
     const light = new THREE.SpotLight(
         color,
         intensity,
         distancia,
         THREE.MathUtils.degToRad(angulo),
-        0.4, // penumbra, suaviza el borde del cono
-        1    // decay
+        0.4,
+        1
     );
     light.position.set(px, py, pz);
     light.castShadow = true;
 
-    // Apunta hacia abajo, como si la luz cayera desde la lámpara
     light.target.position.set(px, py - 10, pz);
     scene.add(light.target);
     scene.add(light);
 
-    // Descomenta solo si quieres ver el cono de luz mientras depuras:
-    //const spotLightHelper = new THREE.SpotLightHelper(light);
-    //scene.add(spotLightHelper);
-
     return light;
 }
 
-// Muestra u oculta las luces de las lámparas según el modo actual
 function actualizarLucesLamparas() {
     lucesLamparasSpot.forEach(function (luz) {
         luz.visible = modoOscuro;
     });
 }
-// ==========================================================
-// TERRENO CON RELIEVE (colinas) + ÁRBOLES ALEATORIOS
-// Sin librerías externas: ruido escrito a mano.
-// ==========================================================
 
-// --- Configuración del relieve ---
-const ALTURA_BASE_TERRENO = -2.8;   // misma altura que tenía el piso plano anterior
-const AMPLITUD_COLINAS = 6;         // qué tan altas son las colinas (unidades del mundo)
-const ESCALA_RUIDO = 0.02;          // más bajo = colinas más anchas/suaves; más alto = más "arrugado"
-const RADIO_ZONA_PLANA = 30;        // radio alrededor del centro que se mantiene 100% plano (iglesia, lámparas, etc.)
-const RADIO_TRANSICION = 60;        // a partir de este radio el relieve ya está al 100%
+const ALTURA_BASE_TERRENO = -2.8;
+const AMPLITUD_COLINAS = 6;
+const ESCALA_RUIDO = 0.02;
+const RADIO_ZONA_PLANA = 30;
+const RADIO_TRANSICION = 60;
 
-// Ruido "value noise" con interpolación suave (sin librerías, hecho a mano)
+// Ruido tipo "value noise" hecho a mano, sin librerías externas
 function ruido2D(x, y) {
     function hash(px, py) {
         const s = Math.sin(px * 127.1 + py * 311.7) * 43758.5453123;
@@ -199,7 +235,7 @@ function ruido2D(x, y) {
     return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a, b, u), THREE.MathUtils.lerp(c, d, u), v);
 }
 
-// Varias "capas" de ruido superpuestas para que las colinas se vean más naturales
+// Combina varias capas de ruido para un relieve más natural
 function ruidoFractal(x, y, octavas) {
     let total = 0, amplitud = 1, frecuencia = 1, maxValor = 0;
     for (let i = 0; i < octavas; i++) {
@@ -208,10 +244,9 @@ function ruidoFractal(x, y, octavas) {
         amplitud *= 0.5;
         frecuencia *= 2;
     }
-    return total / maxValor; // normalizado entre 0 y 1
+    return total / maxValor;
 }
 
-// Transición suave entre 0 y 1 (sin depender de THREE.MathUtils.smoothstep por compatibilidad)
 function suavizarEntre(x, borde0, borde1) {
     if (x <= borde0) return 0;
     if (x >= borde1) return 1;
@@ -219,22 +254,21 @@ function suavizarEntre(x, borde0, borde1) {
     return t * t * (3 - 2 * t);
 }
 
-// Altura del terreno en cualquier punto (x, z). La usan tanto el mesh del suelo
-// como los árboles, para que ambos coincidan perfectamente.
+// Altura del terreno en (x, z); la usan tanto el suelo como los árboles
 function calcularAlturaTerreno(x, z) {
     const distanciaCentro = Math.sqrt(x * x + z * z);
     const factorRelieve = suavizarEntre(distanciaCentro, RADIO_ZONA_PLANA, RADIO_TRANSICION);
-    const ruido = ruidoFractal(x * ESCALA_RUIDO, z * ESCALA_RUIDO, 4); // 0..1
-    const desplazamiento = (ruido - 0.5) * 2 * AMPLITUD_COLINAS;       // -AMPLITUD..+AMPLITUD
+    const ruido = ruidoFractal(x * ESCALA_RUIDO, z * ESCALA_RUIDO, 4);
+    const desplazamiento = (ruido - 0.5) * 2 * AMPLITUD_COLINAS;
     return ALTURA_BASE_TERRENO + desplazamiento * factorRelieve;
 }
 
 function crearTerreno() {
-    const tamano = 600;     // ancho/alto total del terreno
-    const segmentos = 200;  // resolución: más segmentos = colinas más suaves pero más caro
+    const tamano = 600;
+    const segmentos = 200;
 
     const geometry = new THREE.PlaneGeometry(tamano, tamano, segmentos, segmentos);
-    geometry.rotateX(-Math.PI / 2); // acostarlo para que quede horizontal
+    geometry.rotateX(-Math.PI / 2);
 
     const posiciones = geometry.attributes.position;
     for (let i = 0; i < posiciones.count; i++) {
@@ -310,7 +344,6 @@ function cargarModelo(archivo, x, y, z, l, m, n, a, esTrofeo) {
                 }
             }
 
-            // Al terminar, marcamos el progreso de ESTE modelo como completo
             progresoModelos[indice].loaded = progresoModelos[indice].total || 1;
             if (!progresoModelos[indice].total) progresoModelos[indice].total = 1;
 
@@ -318,7 +351,6 @@ function cargarModelo(archivo, x, y, z, l, m, n, a, esTrofeo) {
             reportarProgreso();
         },
         function (xhr) {
-            // Progreso real de descarga de ESTE modelo
             if (xhr.lengthComputable) {
                 progresoModelos[indice].loaded = xhr.loaded;
                 progresoModelos[indice].total = xhr.total;
@@ -367,9 +399,6 @@ function cargarModeloIndividual(archivo, x, y, z, l, m, n, a, callback) {
     );
 }
 
-// ==========================================================
-// BARRA DE PROGRESO (real, basada en bytes descargados)
-// ==========================================================
 function reportarProgreso() {
     let loaded = 0;
     let total = 0;
@@ -381,7 +410,6 @@ function reportarProgreso() {
 
     let porcentaje = total === 0 ? 0 : (loaded / total) * 100;
 
-    // Nunca mostrar 100% hasta que TODOS los modelos hayan terminado de verdad
     const limite = (modelosCargados >= totalModelos) ? 100 : 99;
     porcentaje = Math.min(Math.round(porcentaje), limite);
 
@@ -417,10 +445,6 @@ function ocultarPantallaCarga() {
     }, 400);
 }
 
-// ==========================================================
-// PANEL DE INFORMACIÓN (lateral, fijo)
-// ==========================================================
-// Lado de la pantalla donde aparece el panel según la vista activa.
 const POSICION_INFO = {
     inicio: 'panel-derecha',
     interior: 'panel-izquierda',
@@ -445,12 +469,9 @@ function mostrarInfo(clave) {
     titulo.textContent = datos.titulo;
     texto.textContent = datos.texto;
     fuente.href = datos.fuente;
-    // Se reinserta "Fuente" como parte del mismo párrafo, para que quede
-    // en la última línea del texto en vez de ocupar una fila aparte.
     texto.appendChild(document.createTextNode(' '));
     texto.appendChild(fuente);
 
-    // Foto opcional: solo se muestra si la vista tiene una definida (data-foto)
     if (foto) {
         if (datos.foto) {
             foto.src = datos.foto;
@@ -466,15 +487,9 @@ function mostrarInfo(clave) {
     panel.classList.remove('panel-derecha', 'panel-izquierda');
     panel.classList.add(POSICION_INFO[clave] || 'panel-derecha');
 
-    // Si el panel tiene scroll de una vista anterior, lo regresamos arriba
     const scroll = panel.querySelector('.panel-info-scroll');
     if (scroll) scroll.scrollTop = 0;
 }
-
-// ==========================================================
-// PANELES "DESARROLLADO POR" Y "UBICACIÓN"
-// ==========================================================
-var panelesCargados = false;
 
 function init_paneles_flotantes() {
     const btnDesarrollador = document.getElementById('btn-desarrollador');
@@ -484,7 +499,6 @@ function init_paneles_flotantes() {
     const panelUbicacion = document.getElementById('panel-ubicacion');
     if (!panelDesarrollador && !panelUbicacion) return;
 
-    panelesCargados = true;
     configurarCierrePaneles();
 
     if (btnDesarrollador) {
@@ -534,9 +548,6 @@ function configurarCierrePaneles() {
     });
 }
 
-// ==========================================================
-// CONTROLES DE CÁMARA
-// ==========================================================
 function init_controls() {
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.target.set(VISTA_INICIAL.target.x, VISTA_INICIAL.target.y, VISTA_INICIAL.target.z);
@@ -567,7 +578,6 @@ function init_arcangel_giro() {
         if (!arrastrando || !modeloArcangel) return;
         const deltaX = x - ultimoX;
         ultimoX = x;
-        // Sensibilidad del giro: ajusta este número si lo quieres más rápido/lento.
         modeloArcangel.rotation.y += deltaX * 0.012;
     }
 
@@ -582,31 +592,34 @@ function init_arcangel_giro() {
     window.addEventListener('pointercancel', terminar);
 }
 
+// Limita cuánto puede orbitar y hacer zoom la cámara; en la vista de inicio usa el
+// rango horizontal amplio, en el resto de vistas usa el rango vertical en todas direcciones
 function actualizarLimitesControles() {
     const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
     const esferico = new THREE.Spherical().setFromVector3(offset);
-    const rangoRad = THREE.MathUtils.degToRad(RANGO_MOVIMIENTO);
 
-    controls.minAzimuthAngle = esferico.theta - rangoRad;
-    controls.maxAzimuthAngle = esferico.theta + rangoRad;
+    const rangoActivo = (vistaActual === 'inicial') ? RANGO_MOVIMIENTO_HORIZONTAL : RANGO_MOVIMIENTO_VERTICAL;
+    const rangoHorizontal = THREE.MathUtils.degToRad(rangoActivo);
+    const rangoVertical = THREE.MathUtils.degToRad(RANGO_MOVIMIENTO_VERTICAL);
 
-    controls.minPolarAngle = Math.max(0.01, esferico.phi - rangoRad);
-    controls.maxPolarAngle = Math.min(Math.PI - 0.01, esferico.phi + rangoRad);
+    controls.minAzimuthAngle = esferico.theta - rangoHorizontal;
+    controls.maxAzimuthAngle = esferico.theta + rangoHorizontal;
 
-    controls.minDistance = Math.max(0.1, esferico.radius - RANGO_MOVIMIENTO);
-    controls.maxDistance = esferico.radius + RANGO_MOVIMIENTO;
+    controls.minPolarAngle = Math.max(0.01, esferico.phi - rangoVertical);
+    controls.maxPolarAngle = Math.min(Math.PI - 0.01, esferico.phi + rangoVertical);
+
+    controls.minDistance = Math.max(0.1, esferico.radius - rangoActivo);
+    controls.maxDistance = esferico.radius + rangoActivo;
 
     controls.update();
 }
 
-// Cambia hacia dónde apunta la cámara sin moverla de lugar
 function apuntarCamara(x, y, z) {
     controls.target.set(x, y, z);
     controls.update();
     actualizarLimitesControles();
 }
 
-// Mueve la cámara suavemente a una nueva posición y target
 function moverCamara(posDestino, targetDestino, duracion) {
     if (duracion === undefined) duracion = 1200;
     if (animandoCamara) return;
@@ -627,7 +640,7 @@ function moverCamara(posDestino, targetDestino, duracion) {
 
     function paso(ahora) {
         const t = Math.min((ahora - tiempoInicio) / duracion, 1);
-        const suave = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // easeInOutQuad
+        const suave = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 
         camera.position.lerpVectors(posInicio, posDestino, suave);
         controls.target.lerpVectors(targetInicio, targetDestino, suave);
@@ -645,9 +658,6 @@ function moverCamara(posDestino, targetDestino, duracion) {
     requestAnimationFrame(paso);
 }
 
-// ==========================================================
-// BOTONES DE NAVEGACIÓN
-// ==========================================================
 function init_botones() {
     const btnInicio = document.getElementById('btn-inicio');
     const btnInterior = document.getElementById('btn-interior');
@@ -656,7 +666,7 @@ function init_botones() {
 
     if (btnInicio) {
         btnInicio.addEventListener('click', function () {
-            ocultarArcangel(); // al cambiar de vista, el modelo del arcángel desaparece
+            ocultarArcangel();
 
             if (vistaActual === 'inicial') return;
 
@@ -671,11 +681,11 @@ function init_botones() {
 
     if (btnInterior) {
         btnInterior.addEventListener('click', function () {
-            ocultarArcangel(); // al cambiar de vista, el modelo del arcángel desaparece
+            ocultarArcangel();
 
-            mostrarInfo('interior'); // el texto se actualiza aunque ya estemos en esta vista
+            mostrarInfo('interior');
 
-            if (vistaActual === 'interior') return; // ya está en esta vista, no se mueve la cámara
+            if (vistaActual === 'interior') return;
 
             vistaActual = 'interior';
             moverCamara(
@@ -689,9 +699,9 @@ function init_botones() {
         btnAltar.addEventListener('click', function () {
             ocultarArcangel();
 
-            mostrarInfo('altar'); 
+            mostrarInfo('altar');
 
-            if (vistaActual === 'altar') return; 
+            if (vistaActual === 'altar') return;
             vistaActual = 'altar';
             moverCamara(
                 new THREE.Vector3(VISTA_ALTAR.pos.x, VISTA_ALTAR.pos.y, VISTA_ALTAR.pos.z),
@@ -712,7 +722,7 @@ function init_botones() {
 
             cargarModeloIndividual(
                 "modelos3d/arcangelop.glb",
-                0, 0, 0, // posición inicial neutra: se recalcula frente a la cámara cada cuadro
+                0, 0, 0,
                 1, 1, 1, VISTA_ARCANGEL.rotacionBase,
                 function (modelo) {
                     btnArcangel.disabled = false;
@@ -774,13 +784,13 @@ function calcularDesplazamientoLateralArcangel(distancia) {
     return anchoVisible * VISTA_ARCANGEL.fraccionLateral;
 }
 
+// Mantiene el arcángel siempre frente a la cámara
 function posicionarArcangelFrenteCamara() {
     if (!modeloArcangel) return;
 
     const direccion = new THREE.Vector3();
     camera.getWorldDirection(direccion);
 
-    // Vector "derecha" real de la cámara, tomado de su matriz de mundo.
     const derechaCamara = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
 
     const desplazamiento = calcularDesplazamientoLateralArcangel(VISTA_ARCANGEL.distanciaCamara);
@@ -788,33 +798,28 @@ function posicionarArcangelFrenteCamara() {
     modeloArcangel.position
         .copy(camera.position)
         .addScaledVector(direccion, VISTA_ARCANGEL.distanciaCamara)
-        .addScaledVector(derechaCamara, -desplazamiento); // negativo: hacia la izquierda de la pantalla
+        .addScaledVector(derechaCamara, -desplazamiento);
     modeloArcangel.position.y += VISTA_ARCANGEL.ajusteVertical;
 }
 
-// ==========================================================
-// CIELO PROCEDURAL (THREE.Sky) - reemplaza a cargarFondo()
-// ==========================================================
+// Cielo procedural con THREE.Sky
 function crearCielo() {
-    sky = new THREE.Sky();
+    const sky = new THREE.Sky();
 
-    // IMPORTANTE: la cámara tiene "far: 1000", así que el cielo debe quedar
-    // DENTRO de ese rango o la cámara no lo renderiza (queda invisible).
     const escalaCielo = camera.far * 0.9;
     sky.scale.setScalar(escalaCielo);
     scene.add(sky);
 
     const uniforms = sky.material.uniforms;
-    uniforms['turbidity'].value = 1;          // mínimo = casi sin neblina (antes 4)
-    uniforms['rayleigh'].value = 4;           // más alto = azul más saturado (antes 3)
-    uniforms['mieCoefficient'].value = 0.001; // la neblina (Mie) es la que blanquea el cielo, la bajamos casi a cero
+    uniforms['turbidity'].value = 1;
+    uniforms['rayleigh'].value = 4;
+    uniforms['mieCoefficient'].value = 0.001;
     uniforms['mieDirectionalG'].value = 0.85;
 
     sol = new THREE.Vector3();
 
-    // Posición del sol en la bóveda celeste (elevación y azimut en grados)
-    const elevacion = 25;  // más alto que antes, para que se vea bien como esfera
-    const azimut = -160;   // dirección horizontal del sol
+    const elevacion = 25;
+    const azimut = -160;
 
     const phi = THREE.MathUtils.degToRad(90 - elevacion);
     const theta = THREE.MathUtils.degToRad(azimut);
@@ -823,10 +828,8 @@ function crearCielo() {
     uniforms['sunPosition'].value.copy(sol);
 
     crearSol(escalaCielo);
-    crearNubes(escalaCielo);
 }
 
-// Genera una textura de resplandor circular (radial) por código, sin archivos externos
 function crearTexturaResplandor(colorCentro, colorBorde) {
     const tam = 256;
     const canvas = document.createElement('canvas');
@@ -844,14 +847,13 @@ function crearTexturaResplandor(colorCentro, colorBorde) {
     return new THREE.CanvasTexture(canvas);
 }
 
-// Disco de sol visible, ubicado en la misma dirección que usa el shader del cielo
 function crearSol(escalaCielo) {
     const textura = crearTexturaResplandor('rgba(255,250,225,1)', 'rgba(255,250,225,0)');
     const material = new THREE.SpriteMaterial({
         map: textura,
         transparent: true,
         depthWrite: false,
-        depthTest: false // así nunca queda tapado por el domo del cielo
+        depthTest: false
     });
 
     const distancia = escalaCielo * 0.4;
@@ -866,72 +868,6 @@ function crearSol(escalaCielo) {
     return sprite;
 }
 
-// Textura de una "nube" individual: varios círculos difusos superpuestos
-function crearTexturaNube() {
-    const tam = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = tam;
-    canvas.height = tam;
-    const ctx = canvas.getContext('2d');
-
-    for (let i = 0; i < 8; i++) {
-        const x = 50 + Math.random() * (tam - 100);
-        const y = 50 + Math.random() * (tam - 100);
-        const r = 35 + Math.random() * 55;
-
-        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-        grad.addColorStop(0, 'rgba(255,255,255,0.85)');
-        grad.addColorStop(1, 'rgba(255,255,255,0)');
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    return new THREE.CanvasTexture(canvas);
-}
-
-// Esparce varias nubes (sprites) en la parte alta del domo del cielo
-function crearNubes(escalaCielo) {
-    const textura = crearTexturaNube();
-    const material = new THREE.SpriteMaterial({
-        map: textura,
-        transparent: true,
-        opacity: 0.85,
-        depthWrite: false,
-        depthTest: false
-    });
-
-    const grupo = new THREE.Group();
-    const cantidad = 20;
-    const distancia = escalaCielo * 0.3;
-
-    for (let i = 0; i < cantidad; i++) {
-        const sprite = new THREE.Sprite(material);
-
-        const angulo = Math.random() * Math.PI * 2;
-        const alturaAngulo = THREE.MathUtils.degToRad(8 + Math.random() * 35);
-
-        const x = distancia * Math.cos(alturaAngulo) * Math.cos(angulo);
-        const y = distancia * Math.sin(alturaAngulo);
-        const z = distancia * Math.cos(alturaAngulo) * Math.sin(angulo);
-
-        sprite.position.set(x, y, z);
-
-        const escala = distancia * (0.15 + Math.random() * 0.15);
-        sprite.scale.set(escala, escala * 0.55, 1);
-
-        grupo.add(sprite);
-    }
-
-    scene.add(grupo);
-    return grupo;
-}
-
-// ==========================================================
-// LUZ AMBIENTAL / DIRECCIONAL
-// ==========================================================
 function setupIluminacion() {
     luzAmbiente = new THREE.HemisphereLight(0xdfe9f5, 0x3a2f1e, 0.1);
     scene.add(luzAmbiente);
@@ -958,9 +894,6 @@ function setupIluminacion() {
     pmremGenerator.dispose();
 }
 
-// ==========================================================
-// MODO DÍA / MODO OSCURO (fondo + iluminación tipo atardecer)
-// ==========================================================
 function aplicarModoIluminacion(modo) {
     const cfg = CONFIG_LUZ[modo];
     if (!cfg || !luzSol || !luzAmbiente || !luzRelleno) return;
@@ -1014,6 +947,12 @@ function init_botones_modo() {
 
 function animate() {
     requestAnimationFrame(animate);
+
+    const delta = clockAnimaciones.getDelta();
+    mixers.forEach(function (mixer) {
+        mixer.update(delta);
+    });
+
     if (modeloArcangel && modeloArcangel.visible) {
         posicionarArcangelFrenteCamara();
         modeloArcangel.position.y += Math.sin(performance.now() * 0.0012) * 0.15;
