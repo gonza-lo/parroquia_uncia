@@ -16,37 +16,27 @@ var modelosCargados = 0;
 var progresoModelos = [];
 var escenaLista = false;
 
-// Objetos 3D contra los que el personaje puede chocar (muros, árboles,
-// estatuas, lámparas...). Guardamos el objeto real (no una caja que lo
-// envuelva) para poder lanzar rayos contra su geometría real: así, si la
-// iglesia tiene puertas o el interior está hueco, el personaje puede
-// entrar igual, en vez de quedar bloqueado por una caja que abarque todo
-// el edificio.
+// Objetos contra los que el personaje puede chocar. Se guarda el objeto
+// real (no una caja envolvente) para poder entrar por puertas/huecos.
 var objetosColisionables = [];
 var raycasterColision = new THREE.Raycaster();
 
 var arcangelCargado = false;
 var modeloArcangel = null;
 var arcangelInteractivo = false;
-var modoArcangelActivo = false; // true mientras se ve/gira el arcángel: pausa personaje y cámara
+var modoArcangelActivo = false;
 
-// --- Pantalla de bienvenida / inicio de la experiencia ---
-// Mientras juegoIniciado es false, el personaje no se mueve y la cámara
-// se queda en una vista panorámica; solo tras pulsar "INICIAR" se activa
-// el control normal (con una transición suave de cámara de por medio).
 var juegoIniciado = false;
 var transicionCamaraActiva = false;
 var transicionCamaraProgreso = 0;
 var transicionCamaraOrigen = null;
-const DURACION_TRANSICION_CAMARA = 1.6; // segundos
+const DURACION_TRANSICION_CAMARA = 1.6;
 
 var luzAmbiente, luzSol, luzRelleno;
 var modoOscuro = false;
 
 var sol;
 
-// Referencia global al mesh del terreno procedural, para poder usarlo
-// también como "suelo" en el raycast de gravedad del personaje.
 var terrenoMesh = null;
 
 var lucesLamparasSpot = [];
@@ -75,16 +65,12 @@ const VISTA_ARCANGEL = {
 };
 
 /* =========================================================
-   UTILIDADES COMUNES A TODO OBJETO 3D DE LA ESCENA
+   UTILIDADES COMUNES
    ========================================================= */
 
-// Blender suele exportar materiales en modo "BLEND" (transparente) aunque
-// no tengan transparencia real (por ejemplo, por un canal alfa vacío en la
-// textura). Eso rompe el orden de profundidad del renderer y provoca que
-// otros objetos —como el personaje— se vean "transparentando" a través del
-// suelo, gradas, etc. Esta función normaliza cualquier material sin
-// transparencia real de vuelta a opaco. Se aplica a TODO modelo que se
-// cargue en la escena (iglesia, gradas, suelo, personaje, lámparas...).
+// Blender exporta a veces materiales "BLEND" sin transparencia real, lo
+// que rompe el orden de profundidad (objetos se ven a través de otros).
+// Se fuerza a opaco cuando la opacidad es prácticamente 1.
 function corregirMaterialSolido(material) {
     if (!material) return;
     const materiales = Array.isArray(material) ? material : [material];
@@ -97,11 +83,9 @@ function corregirMaterialSolido(material) {
     });
 }
 
-// Elimina el desplazamiento horizontal (X/Z) que algunas animaciones traen
-// "horneado" en el hueso raíz (root motion), dejando solo el movimiento
-// vertical (rebote). Así el avance real del personaje depende únicamente
-// de nuestro código y no se reinicia ni salta al repetir o encadenar
-// animaciones.
+// Quita el desplazamiento horizontal "horneado" en el hueso raíz de la
+// animación, dejando solo el rebote vertical. El avance real lo controla
+// nuestro código, no la animación.
 function quitarDesplazamientoHorizontal(clip) {
     clip.tracks.forEach(function (track) {
         if (track.isVectorKeyframeTrack && track.name.endsWith('.position')) {
@@ -128,41 +112,23 @@ var accionComenzar = null;
 var accionCaminando = null;
 var accionActual = null;
 
-// idle -> comenzando (una sola vez) -> caminando (loop) -> idle
 var estadoPersonaje = 'idle';
 var teclaW = false;
-var teclaQ = false; // tecla para subir gradas manualmente (pendiente de 45°)
+var teclaQ = false;
 
 const ESCALA_PERSONAJE = { x: 0.02, y: 0.02, z: 0.02 };
-const POSICION_INICIAL_PERSONAJE = { x: -55, z: 0 };
-const VELOCIDAD_PERSONAJE = 6; // unidades por segundo
+const POSICION_INICIAL_PERSONAJE = { x: -55, z: 20 };
+const VELOCIDAD_PERSONAJE = 6;
 
-// --- Colisión del personaje contra objetos de la escena ---
-// Alturas (desde los pies) a las que se lanzan los rayos horizontales:
-// una a la altura del torso y otra baja, para detectar también bordes
-// de gradas, troncos gruesos, etc.
 const ALTURA_RAYO_COLISION_TORSO = 1.4;
-// Las gradas de la iglesia (modeladas en Blender) tienen peldaños de 0.3.
-// El rayo "bajo" se coloca un poco por encima de esa altura para que no
-// choque contra el borde vertical (contrahuella) de cada peldaño: así el
-// personaje puede subir la escalera con normalidad en vez de quedar
-// bloqueado en el primer escalón. La altura del personaje se sigue
-// ajustando cada frame (actualizarAlturaPersonaje) pegándolo a la huella
-// real del escalón sobre el que está parado.
+// Altura baja para detectar bordes de gradas sin chocar contra la
+// contrahuella de cada peldaño (los escalones de la iglesia miden 0.3).
 const ALTURA_RAYO_COLISION_BAJA = 0.4;
 const ALTURAS_RAYOS_COLISION = [ALTURA_RAYO_COLISION_TORSO, ALTURA_RAYO_COLISION_BAJA];
-// Distancia mínima permitida entre el personaje y cualquier objeto
-// colisionable delante de él.
 const RADIO_COLISION_PERSONAJE = 1.0;
-// Ángulos (en radianes) de los rayos en abanico hacia la dirección de
-// movimiento, para cubrir el "ancho" del personaje.
 const ANGULOS_RAYOS_COLISION = [0, 0.35, -0.35, 0.7, -0.7];
 
-// Devuelve true si moverse en la dirección (dirX, dirZ) haría que el
-// personaje chocara contra algún objeto colisionable de la escena.
-// distanciaExtra permite alargar el rayo según cuánto se va a avanzar
-// este frame, para no "atravesar" una pared delgada en un frame lento
-// (tunneling).
+// true si moverse en (dirX, dirZ) haría chocar al personaje contra algo.
 function direccionBloqueada(dirX, dirZ, distanciaExtra) {
     if (objetosColisionables.length === 0) return false;
     if (dirX === 0 && dirZ === 0) return false;
@@ -195,14 +161,16 @@ function direccionBloqueada(dirX, dirZ, distanciaExtra) {
     return false;
 }
 
-// Ajusta la altura (Y) del personaje pegándolo a la superficie real que
-// tenga debajo: terreno procedural, piso o gradas de la iglesia, etc.
-// Se lanza un rayo hacia abajo desde bien arriba del personaje y se usa
-// el primer impacto (el más alto), para que las gradas funcionen como
-// escalones reales en vez de una rampa matemática.
+// --- Altura del personaje (piso bajo los pies) ---
 const raycasterSuelo = new THREE.Raycaster();
 const ALTURA_ORIGEN_RAYO_SUELO = 50;
 const DISTANCIA_MAXIMA_RAYO_SUELO = 200;
+// Margen que permite subir un escalón/rampa por frame. Cualquier
+// superficie golpeada por encima de (altura actual + margen) se ignora:
+// así, al entrar por la puerta de la iglesia, el rayo no confunde el
+// techo (mucho más arriba) con el piso real y el personaje ya no queda
+// "teletransportado" encima del edificio en vez de adentro.
+const MARGEN_ALTURA_SUELO = 1.2;
 
 function actualizarAlturaPersonaje() {
     if (!personaje) return;
@@ -222,17 +190,30 @@ function actualizarAlturaPersonaje() {
 
     const impactos = raycasterSuelo.intersectObjects(objetivosSuelo, true);
 
-    if (impactos.length > 0) {
-        personaje.position.y = impactos[0].point.y;
+    // Los impactos vienen ordenados del más cercano al origen (más alto)
+    // al más lejano. Se toma el primero que esté a la altura del
+    // personaje o por debajo (+ margen), descartando techos/entrepisos
+    // que queden por encima de donde el personaje realmente está parado.
+    const alturaMaxima = personaje.position.y + MARGEN_ALTURA_SUELO;
+    let impactoValido = null;
+    for (let i = 0; i < impactos.length; i++) {
+        if (impactos[i].point.y <= alturaMaxima) {
+            impactoValido = impactos[i];
+            break;
+        }
+    }
+
+    if (impactoValido) {
+        personaje.position.y = impactoValido.point.y;
+    } else if (impactos.length > 0) {
+        // Todos los impactos quedaron por encima (p. ej. recién entrando
+        // bajo un techo bajo): se usa el más bajo de los detectados.
+        personaje.position.y = impactos[impactos.length - 1].point.y;
     } else {
-        // Red de seguridad: si todavía no cargó nada colisionable
-        // (o el personaje quedó fuera de todo), usa el terreno matemático.
         personaje.position.y = calcularAlturaTerreno(personaje.position.x, personaje.position.z);
     }
 }
 
-// El personaje miraba hacia la pantalla; 180° lo hace mirar hacia el lado
-// contrario (el que corresponde al avance con la tecla W).
 const AJUSTE_ROTACION_PERSONAJE = Math.PI;
 
 var luzPersonaje = null;
@@ -277,8 +258,6 @@ function cargarPersonaje() {
 
             agregarLuzPersonaje();
 
-            // "comenzar" y "caminando" se cargan aparte, solo para tomar su
-            // AnimationClip y aplicarlo sobre el mismo mixer/esqueleto.
             cargarAnimacionPersonaje('personaje/comenzar.fbx', function (clip) {
                 quitarDesplazamientoHorizontal(clip);
                 accionComenzar = mixerPersonaje.clipAction(clip);
@@ -308,7 +287,6 @@ function cargarPersonaje() {
     );
 }
 
-// Carga un FBX únicamente para extraer su primer AnimationClip
 function cargarAnimacionPersonaje(archivo, callback) {
     const loader = new THREE.FBXLoader();
     loader.load(
@@ -352,7 +330,6 @@ function iniciarCaminata() {
         estadoPersonaje = 'comenzando';
         cambiarAnimacion(accionComenzar, 0.2);
     } else if (accionCaminando) {
-        // Fallback por si "comenzar" todavía no terminó de cargar
         estadoPersonaje = 'caminando';
         cambiarAnimacion(accionCaminando, 0.2);
     }
@@ -392,22 +369,17 @@ function init_controles_personaje() {
     });
 }
 
-// Movimiento, gravedad, dirección (mouse) y luz propia del personaje
 function actualizarPersonaje(delta) {
     if (!personaje || modoArcangelActivo || !juegoIniciado) return;
 
     personaje.rotation.y = yawCamara + AJUSTE_ROTACION_PERSONAJE;
 
     if (teclaQ) {
-        // Modo "subir gradas": mientras se mantiene presionada Q, el
-        // personaje avanza en línea recta sobre una pendiente de 45°
-        // (componente horizontal y vertical iguales). Se hace a propósito
-        // sin pasar por el raycast de altura de actualizarAlturaPersonaje,
-        // que es lo que "tiraba" al personaje de vuelta hacia abajo y
-        // le impedía subir los escalones con normalidad.
+        // Modo "subir gradas": avanza en pendiente de 45° fija, sin pasar
+        // por actualizarAlturaPersonaje (que lo devolvería hacia abajo).
         const forwardX = -Math.sin(yawCamara);
         const forwardZ = -Math.cos(yawCamara);
-        const avanceSubida = VELOCIDAD_PERSONAJE * delta * Math.SQRT1_2; // cos45° = sin45°
+        const avanceSubida = VELOCIDAD_PERSONAJE * delta * Math.SQRT1_2;
 
         personaje.position.x += forwardX * avanceSubida;
         personaje.position.z += forwardZ * avanceSubida;
@@ -419,22 +391,15 @@ function actualizarPersonaje(delta) {
             const avance = VELOCIDAD_PERSONAJE * delta;
 
             if (!direccionBloqueada(forwardX, forwardZ, avance)) {
-                // Camino libre: avanza normalmente.
                 personaje.position.x += forwardX * avance;
                 personaje.position.z += forwardZ * avance;
             } else if (!direccionBloqueada(forwardX, 0, avance)) {
-                // Bloqueado de frente, pero libre en X: se desliza contra la pared.
                 personaje.position.x += forwardX * avance;
             } else if (!direccionBloqueada(0, forwardZ, avance)) {
-                // Bloqueado de frente, pero libre en Z: se desliza contra la pared.
                 personaje.position.z += forwardZ * avance;
             }
-            // Si las tres direcciones están bloqueadas, el personaje se queda quieto.
         }
 
-        // Altura pegada a la superficie real (terreno, piso o gradas de la
-        // iglesia, etc.). Se omite mientras se sube con Q para no anular
-        // ese ascenso manual.
         actualizarAlturaPersonaje();
     }
 
@@ -442,8 +407,6 @@ function actualizarPersonaje(delta) {
 }
 
 function agregarLuzPersonaje() {
-    // Luz dedicada que solo ilumina al personaje (y su entorno cercano),
-    // sin tocar la iluminación general de la escena.
     luzPersonaje = new THREE.PointLight(0xfff2d9, 1.8, 12, 2);
     luzPersonaje.castShadow = false;
     scene.add(luzPersonaje);
@@ -460,7 +423,7 @@ function actualizarLuzPersonaje() {
 }
 
 /* =========================================================
-   CÁMARA EN TERCERA PERSONA (mouse look tipo videojuego)
+   CÁMARA EN TERCERA PERSONA
    ========================================================= */
 
 const CAMARA_TERCERA_PERSONA = {
@@ -502,11 +465,6 @@ function init_camara_tercera_persona() {
     });
 }
 
-// Calcula dónde deberían estar la cámara y su punto de mira para la vista
-// en tercera persona normal, según la posición del personaje y el
-// yaw/pitch actuales. Se separa de actualizarCamaraTercerapersona() para
-// poder reutilizarla también durante la transición suave de la pantalla
-// de bienvenida.
 function calcularDestinoCamaraTercerapersona() {
     if (!personaje) return null;
 
@@ -541,16 +499,13 @@ function actualizarCamaraTercerapersona() {
 }
 
 /* =========================================================
-   PANTALLA DE BIENVENIDA (título + botón "INICIAR")
+   PANTALLA DE BIENVENIDA
    ========================================================= */
 
-// Vista panorámica: un poco más lejos y más arriba de donde arranca
-// normalmente la cámara en tercera persona, para que se vea el mundo 3D
-// de fondo mientras el usuario todavía no presiona "INICIAR".
 const CAMARA_VISTA_INICIO = {
-    offsetX: 16,
+    offsetX: -30,
     altura: 20,
-    offsetZ: 26
+    offsetZ: 50
 };
 
 function posicionarCamaraVistaInicio() {
@@ -572,10 +527,6 @@ function mostrarPantallaInicio() {
     if (pantalla) pantalla.classList.add('visible');
 }
 
-// Se llama al pulsar "INICIAR": oculta la pantalla de bienvenida y
-// arranca una transición suave de cámara desde la vista panorámica hacia
-// la vista en tercera persona normal, momento en el que se habilita el
-// control del personaje.
 function iniciarExperiencia() {
     if (juegoIniciado) return;
 
@@ -609,7 +560,7 @@ function actualizarTransicionCamara(delta) {
 
     transicionCamaraProgreso += delta / DURACION_TRANSICION_CAMARA;
     const t = Math.min(transicionCamaraProgreso, 1);
-    const tSuave = t * t * (3 - 2 * t); // smoothstep
+    const tSuave = t * t * (3 - 2 * t);
 
     camera.position.lerpVectors(transicionCamaraOrigen, destino.posicion, tSuave);
     camera.lookAt(destino.mira);
@@ -666,7 +617,6 @@ function init() {
     crearCielo();
     crearTerreno();
 
-    // personaje (true) o es solo decorativo/atravesable (false).
     cargarModelo("modelos3d/iglesia.glb", 0, 0, 0, 1, 1, 1, 0, true);
     cargarModelo("modelos3d/cura2.glb", -10, 3.3, 0, 5, 5, 5, Math.PI / -2, true);
     cargarModelo("modelos3d/arcangelop.glb", 0, 9, 0, 2, 2, 2, Math.PI / -2, false);
@@ -727,7 +677,6 @@ const ESCALA_RUIDO = 0.02;
 const RADIO_ZONA_PLANA = 60;
 const RADIO_TRANSICION = 120;
 
-// Ruido tipo "value noise" hecho a mano, sin librerías externas
 function ruido2D(x, y) {
     function hash(px, py) {
         const s = Math.sin(px * 127.1 + py * 311.7) * 43758.5453123;
@@ -748,7 +697,6 @@ function ruido2D(x, y) {
     return THREE.MathUtils.lerp(THREE.MathUtils.lerp(a, b, u), THREE.MathUtils.lerp(c, d, u), v);
 }
 
-// Combina varias capas de ruido para un relieve más natural
 function ruidoFractal(x, y, octavas) {
     let total = 0, amplitud = 1, frecuencia = 1, maxValor = 0;
     for (let i = 0; i < octavas; i++) {
@@ -767,7 +715,6 @@ function suavizarEntre(x, borde0, borde1) {
     return t * t * (3 - 2 * t);
 }
 
-// Altura del terreno en (x, z); la usan tanto el suelo como el personaje
 function calcularAlturaTerreno(x, z) {
     const distanciaCentro = Math.sqrt(x * x + z * z);
     const factorRelieve = suavizarEntre(distanciaCentro, RADIO_ZONA_PLANA, RADIO_TRANSICION);
@@ -852,18 +799,11 @@ function cargarModelo(archivo, x, y, z, l, m, n, a, esTrofeo) {
             scene.add(modelo);
 
             if (esTrofeo) {
-                // Se registra el objeto real (no una caja que lo envuelva) para
-                // que el personaje choque contra su geometría real y pueda
-                // entrar por puertas/huecos aunque el modelo sea, por ejemplo,
-                // la iglesia completa.
                 modelo.updateMatrixWorld(true);
 
-                // Blender a veces exporta caras con la normal "al revés". Si el
-                // material queda a una sola cara (FrontSide, el valor por
-                // defecto), el raycast de colisión puede atravesar esa cara sin
-                // detectarla según desde qué lado se acerque el personaje. Para
-                // que el choque sea confiable sin importar la normal, se fuerza
-                // doble cara SOLO en los objetos colisionables.
+                // Doble cara solo en colisionables: si Blender exportó
+                // alguna normal invertida, el raycast de colisión no la
+                // atraviesa sin detectarla.
                 modelo.traverse(function (child) {
                     if (child.isMesh && child.material) {
                         const materialesHijo = Array.isArray(child.material) ? child.material : [child.material];
@@ -987,15 +927,11 @@ const POSICION_INFO = {
    CONTENIDO DEL PANEL SEGÚN LA POSICIÓN DEL PERSONAJE
    ========================================================= */
 
-// El plano se divide en 4 sectores a lo largo de X (todos entre
-// z = -10 y z = 10). Cada sector muestra automáticamente el contenido
-// que antes mostraban los botones de navegación. Fuera de este plano
-// (en X o en Z) no se muestra ningún contenido.
 const ZONAS_INFO = [
-    { clave: 'arcangel', xMin: -20, xMax: 0 },   // 0 a -20
-    { clave: 'altar', xMin: -40, xMax: -20 },    // -20 a -40
-    { clave: 'inicio', xMin: -50, xMax: -40 },   // -40 a -50
-    { clave: 'interior', xMin: -70, xMax: -50 }  // -50 a -70
+    { clave: 'arcangel', xMin: -20, xMax: 0 },
+    { clave: 'altar', xMin: -40, xMax: -20 },
+    { clave: 'inicio', xMin: -50, xMax: -40 },
+    { clave: 'interior', xMin: -70, xMax: -50 }
 ];
 const Z_MINIMO_ZONAS = -10;
 const Z_MAXIMO_ZONAS = 10;
@@ -1203,7 +1139,6 @@ function calcularDesplazamientoLateralArcangel(distancia) {
     return anchoVisible * VISTA_ARCANGEL.fraccionLateral;
 }
 
-// Mantiene el arcángel siempre frente a la cámara
 function posicionarArcangelFrenteCamara() {
     if (!modeloArcangel) return;
 
@@ -1221,7 +1156,6 @@ function posicionarArcangelFrenteCamara() {
     modeloArcangel.position.y += VISTA_ARCANGEL.ajusteVertical;
 }
 
-// Cielo procedural con THREE.Sky
 function crearCielo() {
     const sky = new THREE.Sky();
 
