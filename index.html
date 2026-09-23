@@ -26,6 +26,19 @@
     <!-- Contenedor de la escena 3D -->
     <div id="contenedor3D"></div>
 
+    <!-- Pantalla de bienvenida: título grande + botón INICIAR.
+         Aparece con el mundo 3D ya visible de fondo (cámara panorámica)
+         y solo al presionar INICIAR se pasa al modo de juego normal. -->
+    <div id="pantalla-inicio" class="pantalla-inicio">
+        <div class="inicio-contenido">
+            <h1 class="inicio-titulo">
+                <span class="inicio-titulo-linea1">Parroquia San Miguel</span>
+                <span class="inicio-titulo-linea2">de Uncía</span>
+            </h1>
+            <button id="btn-iniciar" class="btn-iniciar">INICIAR</button>
+        </div>
+    </div>
+
     <!-- Degradado decorativo: negro a transparente, en la parte superior -->
     <div id="degradado-superior" aria-hidden="true"></div>
 
@@ -128,15 +141,14 @@
         </div>
     </div>
 
-    <!-- Panel de botones de navegación -->
-    <div id="panel-botones">
-        <button id="btn-inicio" class="boton-nav">INICIO</button>
-        <button id="btn-interior" class="boton-nav">HISTORIA</button>
-        <button id="btn-altar" class="boton-nav">FIESTA PATRONAL</button>
-        <button id="btn-arcangel" class="boton-nav">ARCÁNGEL SAN MIGUEL</button>
+    <!-- Ayuda de controles (abajo a la izquierda) -->
+    <div id="controles-ayuda" class="controles-ayuda">
+        <p><span class="tecla">W</span> Avanzar adelante</p>
+        <p><span class="tecla">Q</span> Subir gradas</p>
     </div>
 
-    <!-- Panel inferior de información: cambia de contenido según la vista activa -->
+    <!-- Panel inferior de información: cambia de contenido automáticamente
+         según el sector del plano (X/Z) en el que se encuentre el personaje -->
     <div id="panel-info">
         <div class="panel-info-scroll">
             <span id="panel-info-etiqueta" class="panel-info-etiqueta">Acerca de este lugar</span>

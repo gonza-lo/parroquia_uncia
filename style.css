@@ -353,64 +353,153 @@ html, body {
     margin-top: 1.1rem;
 }
 
-/* ---------- Panel de botones de navegación ---------- */
+/* ---------- Pantalla de bienvenida (título + botón INICIAR) ---------- */
 
-#panel-botones {
+.pantalla-inicio {
     position: fixed;
-    bottom: 2rem;
-    left: 50%;
-    transform: translateX(-50%) translateY(20px);
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 30;
 
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     justify-content: center;
-    gap: 0.9rem;
 
-    z-index: 10;
+    background: radial-gradient(circle at center, rgba(10, 14, 20, 0.35) 0%, rgba(10, 14, 20, 0.75) 100%);
+
     opacity: 0;
+    visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.8s ease 0.2s, transform 0.8s ease 0.2s;
+    transition: opacity 0.7s ease, visibility 0.7s ease;
 }
 
-#panel-botones.visible {
+.pantalla-inicio.visible {
     opacity: 1;
+    visibility: visible;
     pointer-events: auto;
-    transform: translateX(-50%) translateY(0);
 }
 
-.boton-nav {
-    padding: 0.75rem 1.5rem;
-    background: var(--color-fondo-panel);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+.pantalla-inicio.oculto {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.inicio-contenido {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 2rem;
+}
+
+.inicio-titulo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.15;
+    margin-bottom: 2.5rem;
+
+    font-family: 'Arial Black', 'Arial Bold', Arial, sans-serif;
+    font-weight: 900;
+}
+
+.inicio-titulo-linea1,
+.inicio-titulo-linea2 {
+    font-size: 3.2rem;
+    letter-spacing: 0.02em;
+
+    background: linear-gradient(90deg, #f4f1ea 0%, #e8c97a 55%, #c9a24b 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.85))
+            drop-shadow(0 0 28px rgba(0, 0, 0, 0.6));
+}
+
+.btn-iniciar {
+    padding: 1rem 3rem;
+    background: var(--color-dorado);
     border: 1px solid var(--color-dorado);
     border-radius: 999px;
 
-    color: var(--color-dorado-oscuro);
+    color: #ffffff;
     font-family: inherit;
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
 
     cursor: pointer;
-    transition: background 0.25s ease, border-color 0.25s ease, transform 0.15s ease;
-    white-space: nowrap;
+    box-shadow: 0 8px 30px rgba(201, 162, 75, 0.4);
+    transition: background 0.25s ease, transform 0.15s ease, box-shadow 0.25s ease;
 }
 
-.boton-nav:hover:not(:disabled) {
-    background: #fdf6e8;
-    border-color: var(--color-dorado);
+.btn-iniciar:hover {
+    background: #e8c97a;
     transform: translateY(-2px);
+    box-shadow: 0 10px 36px rgba(201, 162, 75, 0.55);
 }
 
-.boton-nav:active:not(:disabled) {
+.btn-iniciar:active {
     transform: translateY(0);
 }
 
-.boton-nav:disabled {
-    opacity: 0.55;
-    cursor: wait;
+/* ---------- Ayuda de controles (abajo a la izquierda) ---------- */
+
+.controles-ayuda {
+    position: fixed;
+    left: 1.75rem;
+    bottom: 1.75rem;
+    z-index: 10;
+
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(10px);
+    transition: opacity 0.8s ease 0.2s, transform 0.8s ease 0.2s;
+}
+
+.controles-ayuda.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.controles-ayuda p {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0;
+
+    color: #f4f1ea;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85), 0 0 14px rgba(0, 0, 0, 0.6);
+}
+
+.controles-ayuda .tecla {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.7rem;
+    height: 1.7rem;
+    padding: 0 0.4rem;
+    border-radius: 6px;
+
+    background: var(--color-fondo-panel);
+    border: 1px solid var(--color-dorado);
+
+    color: var(--color-dorado-oscuro);
+    font-weight: 700;
+    font-size: 0.85rem;
 }
 
 /* ---------- Responsivo ---------- */
@@ -435,16 +524,33 @@ html, body {
         height: 44px;
     }
 
-    #panel-botones {
-        bottom: 1.2rem;
-        gap: 0.6rem;
-        width: 100%;
-        padding: 0 0.75rem;
+    .inicio-titulo-linea1,
+    .inicio-titulo-linea2 {
+        font-size: 1.9rem;
     }
 
-    .boton-nav {
-        padding: 0.6rem 1rem;
-        font-size: 0.7rem;
+    .inicio-titulo {
+        margin-bottom: 1.8rem;
+    }
+
+    .btn-iniciar {
+        padding: 0.85rem 2.2rem;
+        font-size: 0.9rem;
+    }
+
+    .controles-ayuda {
+        left: 1rem;
+        bottom: 1.2rem;
+    }
+
+    .controles-ayuda p {
+        font-size: 0.75rem;
+    }
+
+    .controles-ayuda .tecla {
+        min-width: 1.5rem;
+        height: 1.5rem;
+        font-size: 0.75rem;
     }
 
     .boton-modo {

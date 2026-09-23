@@ -1,4 +1,4 @@
-var scene, camera, renderer, controls;
+var scene, camera, renderer;
 
 var mixers = [];
 var clockAnimaciones = new THREE.Clock();
@@ -14,23 +14,40 @@ const POSICIONES_LAMPARAS = [
 var totalModelos = 0;
 var modelosCargados = 0;
 var progresoModelos = [];
-var cajasColision = [];
 var escenaLista = false;
 
-var animandoCamara = false;
-var RANGO_MOVIMIENTO_HORIZONTAL = 20;
-var RANGO_MOVIMIENTO_VERTICAL = 4;
+// Objetos 3D contra los que el personaje puede chocar (muros, árboles,
+// estatuas, lámparas...). Guardamos el objeto real (no una caja que lo
+// envuelva) para poder lanzar rayos contra su geometría real: así, si la
+// iglesia tiene puertas o el interior está hueco, el personaje puede
+// entrar igual, en vez de quedar bloqueado por una caja que abarque todo
+// el edificio.
+var objetosColisionables = [];
+var raycasterColision = new THREE.Raycaster();
 
 var arcangelCargado = false;
 var modeloArcangel = null;
 var arcangelInteractivo = false;
+var modoArcangelActivo = false; // true mientras se ve/gira el arcángel: pausa personaje y cámara
 
-var vistaActual = 'inicial';
+// --- Pantalla de bienvenida / inicio de la experiencia ---
+// Mientras juegoIniciado es false, el personaje no se mueve y la cámara
+// se queda en una vista panorámica; solo tras pulsar "INICIAR" se activa
+// el control normal (con una transición suave de cámara de por medio).
+var juegoIniciado = false;
+var transicionCamaraActiva = false;
+var transicionCamaraProgreso = 0;
+var transicionCamaraOrigen = null;
+const DURACION_TRANSICION_CAMARA = 1.6; // segundos
 
 var luzAmbiente, luzSol, luzRelleno;
 var modoOscuro = false;
 
 var sol;
+
+// Referencia global al mesh del terreno procedural, para poder usarlo
+// también como "suelo" en el raycast de gravedad del personaje.
+var terrenoMesh = null;
 
 var lucesLamparasSpot = [];
 
@@ -49,21 +66,6 @@ const CONFIG_LUZ = {
     }
 };
 
-const VISTA_INICIAL = {
-    pos: { x: -75, y: 20, z: 10 },
-    target: { x: 0, y: 0, z: 0 }
-};
-
-const VISTA_INTERIOR = {
-    pos: { x: -35, y: 7, z: 0 },
-    target: { x: 0, y: 0, z: 0 }
-};
-
-const VISTA_ALTAR = {
-    pos: { x: -20, y: 10, z: 0 },
-    target: { x: 0, y: 0, z: 0 }
-};
-
 const VISTA_ARCANGEL = {
     distanciaCamara: 14,
     fraccionPantalla: 0.82,
@@ -71,6 +73,555 @@ const VISTA_ARCANGEL = {
     ajusteVertical: -0.5,
     fraccionLateral: 0
 };
+
+/* =========================================================
+   UTILIDADES COMUNES A TODO OBJETO 3D DE LA ESCENA
+   ========================================================= */
+
+// Blender suele exportar materiales en modo "BLEND" (transparente) aunque
+// no tengan transparencia real (por ejemplo, por un canal alfa vacío en la
+// textura). Eso rompe el orden de profundidad del renderer y provoca que
+// otros objetos —como el personaje— se vean "transparentando" a través del
+// suelo, gradas, etc. Esta función normaliza cualquier material sin
+// transparencia real de vuelta a opaco. Se aplica a TODO modelo que se
+// cargue en la escena (iglesia, gradas, suelo, personaje, lámparas...).
+function corregirMaterialSolido(material) {
+    if (!material) return;
+    const materiales = Array.isArray(material) ? material : [material];
+    materiales.forEach(function (mat) {
+        if (mat.transparent && mat.opacity >= 0.999) {
+            mat.transparent = false;
+        }
+        mat.depthWrite = true;
+        mat.depthTest = true;
+    });
+}
+
+// Elimina el desplazamiento horizontal (X/Z) que algunas animaciones traen
+// "horneado" en el hueso raíz (root motion), dejando solo el movimiento
+// vertical (rebote). Así el avance real del personaje depende únicamente
+// de nuestro código y no se reinicia ni salta al repetir o encadenar
+// animaciones.
+function quitarDesplazamientoHorizontal(clip) {
+    clip.tracks.forEach(function (track) {
+        if (track.isVectorKeyframeTrack && track.name.endsWith('.position')) {
+            const valores = track.values;
+            const xInicial = valores[0];
+            const zInicial = valores[2];
+            for (let i = 0; i < valores.length; i += 3) {
+                valores[i] = xInicial;
+                valores[i + 2] = zInicial;
+            }
+        }
+    });
+    return clip;
+}
+
+/* =========================================================
+   PERSONAJE JUGABLE
+   ========================================================= */
+
+var personaje = null;
+var mixerPersonaje = null;
+var accionParado = null;
+var accionComenzar = null;
+var accionCaminando = null;
+var accionActual = null;
+
+// idle -> comenzando (una sola vez) -> caminando (loop) -> idle
+var estadoPersonaje = 'idle';
+var teclaW = false;
+var teclaQ = false; // tecla para subir gradas manualmente (pendiente de 45°)
+
+const ESCALA_PERSONAJE = { x: 0.02, y: 0.02, z: 0.02 };
+const POSICION_INICIAL_PERSONAJE = { x: -55, z: 0 };
+const VELOCIDAD_PERSONAJE = 6; // unidades por segundo
+
+// --- Colisión del personaje contra objetos de la escena ---
+// Alturas (desde los pies) a las que se lanzan los rayos horizontales:
+// una a la altura del torso y otra baja, para detectar también bordes
+// de gradas, troncos gruesos, etc.
+const ALTURA_RAYO_COLISION_TORSO = 1.4;
+// Las gradas de la iglesia (modeladas en Blender) tienen peldaños de 0.3.
+// El rayo "bajo" se coloca un poco por encima de esa altura para que no
+// choque contra el borde vertical (contrahuella) de cada peldaño: así el
+// personaje puede subir la escalera con normalidad en vez de quedar
+// bloqueado en el primer escalón. La altura del personaje se sigue
+// ajustando cada frame (actualizarAlturaPersonaje) pegándolo a la huella
+// real del escalón sobre el que está parado.
+const ALTURA_RAYO_COLISION_BAJA = 0.4;
+const ALTURAS_RAYOS_COLISION = [ALTURA_RAYO_COLISION_TORSO, ALTURA_RAYO_COLISION_BAJA];
+// Distancia mínima permitida entre el personaje y cualquier objeto
+// colisionable delante de él.
+const RADIO_COLISION_PERSONAJE = 1.0;
+// Ángulos (en radianes) de los rayos en abanico hacia la dirección de
+// movimiento, para cubrir el "ancho" del personaje.
+const ANGULOS_RAYOS_COLISION = [0, 0.35, -0.35, 0.7, -0.7];
+
+// Devuelve true si moverse en la dirección (dirX, dirZ) haría que el
+// personaje chocara contra algún objeto colisionable de la escena.
+// distanciaExtra permite alargar el rayo según cuánto se va a avanzar
+// este frame, para no "atravesar" una pared delgada en un frame lento
+// (tunneling).
+function direccionBloqueada(dirX, dirZ, distanciaExtra) {
+    if (objetosColisionables.length === 0) return false;
+    if (dirX === 0 && dirZ === 0) return false;
+
+    const distancia = RADIO_COLISION_PERSONAJE + (distanciaExtra || 0);
+    const ejeArriba = new THREE.Vector3(0, 1, 0);
+
+    for (let a = 0; a < ALTURAS_RAYOS_COLISION.length; a++) {
+        const origen = new THREE.Vector3(
+            personaje.position.x,
+            personaje.position.y + ALTURAS_RAYOS_COLISION[a],
+            personaje.position.z
+        );
+
+        for (let i = 0; i < ANGULOS_RAYOS_COLISION.length; i++) {
+            const direccion = new THREE.Vector3(dirX, 0, dirZ)
+                .normalize()
+                .applyAxisAngle(ejeArriba, ANGULOS_RAYOS_COLISION[i]);
+
+            raycasterColision.set(origen, direccion);
+            raycasterColision.far = distancia;
+
+            const impactos = raycasterColision.intersectObjects(objetosColisionables, true);
+            if (impactos.length > 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// Ajusta la altura (Y) del personaje pegándolo a la superficie real que
+// tenga debajo: terreno procedural, piso o gradas de la iglesia, etc.
+// Se lanza un rayo hacia abajo desde bien arriba del personaje y se usa
+// el primer impacto (el más alto), para que las gradas funcionen como
+// escalones reales en vez de una rampa matemática.
+const raycasterSuelo = new THREE.Raycaster();
+const ALTURA_ORIGEN_RAYO_SUELO = 50;
+const DISTANCIA_MAXIMA_RAYO_SUELO = 200;
+
+function actualizarAlturaPersonaje() {
+    if (!personaje) return;
+
+    const origen = new THREE.Vector3(
+        personaje.position.x,
+        personaje.position.y + ALTURA_ORIGEN_RAYO_SUELO,
+        personaje.position.z
+    );
+
+    raycasterSuelo.set(origen, new THREE.Vector3(0, -1, 0));
+    raycasterSuelo.far = DISTANCIA_MAXIMA_RAYO_SUELO;
+
+    const objetivosSuelo = terrenoMesh
+        ? objetosColisionables.concat([terrenoMesh])
+        : objetosColisionables;
+
+    const impactos = raycasterSuelo.intersectObjects(objetivosSuelo, true);
+
+    if (impactos.length > 0) {
+        personaje.position.y = impactos[0].point.y;
+    } else {
+        // Red de seguridad: si todavía no cargó nada colisionable
+        // (o el personaje quedó fuera de todo), usa el terreno matemático.
+        personaje.position.y = calcularAlturaTerreno(personaje.position.x, personaje.position.z);
+    }
+}
+
+// El personaje miraba hacia la pantalla; 180° lo hace mirar hacia el lado
+// contrario (el que corresponde al avance con la tecla W).
+const AJUSTE_ROTACION_PERSONAJE = Math.PI;
+
+var luzPersonaje = null;
+
+function cargarPersonaje() {
+    const loader = new THREE.FBXLoader();
+
+    loader.load(
+        'personaje/parado.fbx',
+        function (modelo) {
+            modelo.scale.set(ESCALA_PERSONAJE.x, ESCALA_PERSONAJE.y, ESCALA_PERSONAJE.z);
+            modelo.position.set(
+                POSICION_INICIAL_PERSONAJE.x,
+                calcularAlturaTerreno(POSICION_INICIAL_PERSONAJE.x, POSICION_INICIAL_PERSONAJE.z),
+                POSICION_INICIAL_PERSONAJE.z
+            );
+            modelo.rotation.y = yawCamara + AJUSTE_ROTACION_PERSONAJE;
+
+            modelo.traverse(function (child) {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    corregirMaterialSolido(child.material);
+                }
+                if (child.isLight) {
+                    child.intensity *= 0;
+                }
+            });
+
+            scene.add(modelo);
+            personaje = modelo;
+
+            mixerPersonaje = new THREE.AnimationMixer(modelo);
+            mixers.push(mixerPersonaje);
+
+            if (modelo.animations && modelo.animations.length > 0) {
+                const clipParado = quitarDesplazamientoHorizontal(modelo.animations[0]);
+                accionParado = mixerPersonaje.clipAction(clipParado);
+                accionParado.play();
+                accionActual = accionParado;
+            }
+
+            agregarLuzPersonaje();
+
+            // "comenzar" y "caminando" se cargan aparte, solo para tomar su
+            // AnimationClip y aplicarlo sobre el mismo mixer/esqueleto.
+            cargarAnimacionPersonaje('personaje/comenzar.fbx', function (clip) {
+                quitarDesplazamientoHorizontal(clip);
+                accionComenzar = mixerPersonaje.clipAction(clip);
+                accionComenzar.setLoop(THREE.LoopOnce);
+                accionComenzar.clampWhenFinished = true;
+            });
+
+            cargarAnimacionPersonaje('personaje/caminando.fbx', function (clip) {
+                quitarDesplazamientoHorizontal(clip);
+                accionCaminando = mixerPersonaje.clipAction(clip);
+                accionCaminando.setLoop(THREE.LoopRepeat);
+            });
+
+            mixerPersonaje.addEventListener('finished', function (e) {
+                if (e.action === accionComenzar && estadoPersonaje === 'comenzando') {
+                    estadoPersonaje = 'caminando';
+                    cambiarAnimacion(accionCaminando, 0.15);
+                }
+            });
+
+            console.log('Personaje cargado correctamente.');
+        },
+        undefined,
+        function (error) {
+            console.error('❌ Error al cargar el personaje (parado.fbx):', error);
+        }
+    );
+}
+
+// Carga un FBX únicamente para extraer su primer AnimationClip
+function cargarAnimacionPersonaje(archivo, callback) {
+    const loader = new THREE.FBXLoader();
+    loader.load(
+        archivo,
+        function (modelo) {
+            if (modelo.animations && modelo.animations.length > 0) {
+                callback(modelo.animations[0]);
+            } else {
+                console.warn('El archivo no contiene animaciones:', archivo);
+            }
+        },
+        undefined,
+        function (error) {
+            console.error('❌ Error al cargar animación:', archivo, error);
+        }
+    );
+}
+
+function cambiarAnimacion(nuevaAccion, duracionFade) {
+    if (!nuevaAccion || nuevaAccion === accionActual) return;
+    duracionFade = (duracionFade !== undefined) ? duracionFade : 0.25;
+
+    nuevaAccion.enabled = true;
+    nuevaAccion.setEffectiveTimeScale(1);
+    nuevaAccion.setEffectiveWeight(1);
+    nuevaAccion.reset();
+    nuevaAccion.play();
+
+    if (accionActual && accionActual !== nuevaAccion) {
+        accionActual.crossFadeTo(nuevaAccion, duracionFade, true);
+    }
+
+    accionActual = nuevaAccion;
+}
+
+function iniciarCaminata() {
+    if (!personaje || !mixerPersonaje) return;
+    if (estadoPersonaje !== 'idle') return;
+
+    if (accionComenzar) {
+        estadoPersonaje = 'comenzando';
+        cambiarAnimacion(accionComenzar, 0.2);
+    } else if (accionCaminando) {
+        // Fallback por si "comenzar" todavía no terminó de cargar
+        estadoPersonaje = 'caminando';
+        cambiarAnimacion(accionCaminando, 0.2);
+    }
+}
+
+function detenerCaminata() {
+    if (!personaje || !mixerPersonaje) return;
+    estadoPersonaje = 'idle';
+    if (accionParado) {
+        cambiarAnimacion(accionParado, 0.25);
+    }
+}
+
+function init_controles_personaje() {
+    window.addEventListener('keydown', function (e) {
+        if (e.code === 'KeyW') {
+            if (!teclaW) {
+                teclaW = true;
+                iniciarCaminata();
+            }
+        } else if (e.code === 'KeyQ') {
+            if (!teclaQ) {
+                teclaQ = true;
+                iniciarCaminata();
+            }
+        }
+    });
+
+    window.addEventListener('keyup', function (e) {
+        if (e.code === 'KeyW') {
+            teclaW = false;
+            if (!teclaQ) detenerCaminata();
+        } else if (e.code === 'KeyQ') {
+            teclaQ = false;
+            if (!teclaW) detenerCaminata();
+        }
+    });
+}
+
+// Movimiento, gravedad, dirección (mouse) y luz propia del personaje
+function actualizarPersonaje(delta) {
+    if (!personaje || modoArcangelActivo || !juegoIniciado) return;
+
+    personaje.rotation.y = yawCamara + AJUSTE_ROTACION_PERSONAJE;
+
+    if (teclaQ) {
+        // Modo "subir gradas": mientras se mantiene presionada Q, el
+        // personaje avanza en línea recta sobre una pendiente de 45°
+        // (componente horizontal y vertical iguales). Se hace a propósito
+        // sin pasar por el raycast de altura de actualizarAlturaPersonaje,
+        // que es lo que "tiraba" al personaje de vuelta hacia abajo y
+        // le impedía subir los escalones con normalidad.
+        const forwardX = -Math.sin(yawCamara);
+        const forwardZ = -Math.cos(yawCamara);
+        const avanceSubida = VELOCIDAD_PERSONAJE * delta * Math.SQRT1_2; // cos45° = sin45°
+
+        personaje.position.x += forwardX * avanceSubida;
+        personaje.position.z += forwardZ * avanceSubida;
+        personaje.position.y += avanceSubida;
+    } else {
+        if (teclaW) {
+            const forwardX = -Math.sin(yawCamara);
+            const forwardZ = -Math.cos(yawCamara);
+            const avance = VELOCIDAD_PERSONAJE * delta;
+
+            if (!direccionBloqueada(forwardX, forwardZ, avance)) {
+                // Camino libre: avanza normalmente.
+                personaje.position.x += forwardX * avance;
+                personaje.position.z += forwardZ * avance;
+            } else if (!direccionBloqueada(forwardX, 0, avance)) {
+                // Bloqueado de frente, pero libre en X: se desliza contra la pared.
+                personaje.position.x += forwardX * avance;
+            } else if (!direccionBloqueada(0, forwardZ, avance)) {
+                // Bloqueado de frente, pero libre en Z: se desliza contra la pared.
+                personaje.position.z += forwardZ * avance;
+            }
+            // Si las tres direcciones están bloqueadas, el personaje se queda quieto.
+        }
+
+        // Altura pegada a la superficie real (terreno, piso o gradas de la
+        // iglesia, etc.). Se omite mientras se sube con Q para no anular
+        // ese ascenso manual.
+        actualizarAlturaPersonaje();
+    }
+
+    actualizarLuzPersonaje();
+}
+
+function agregarLuzPersonaje() {
+    // Luz dedicada que solo ilumina al personaje (y su entorno cercano),
+    // sin tocar la iluminación general de la escena.
+    luzPersonaje = new THREE.PointLight(0xfff2d9, 1.8, 12, 2);
+    luzPersonaje.castShadow = false;
+    scene.add(luzPersonaje);
+    actualizarLuzPersonaje();
+}
+
+function actualizarLuzPersonaje() {
+    if (!luzPersonaje || !personaje) return;
+    luzPersonaje.position.set(
+        personaje.position.x,
+        personaje.position.y + 3,
+        personaje.position.z
+    );
+}
+
+/* =========================================================
+   CÁMARA EN TERCERA PERSONA (mouse look tipo videojuego)
+   ========================================================= */
+
+const CAMARA_TERCERA_PERSONA = {
+    distancia: 7,
+    altura: 3.5,
+    alturaMira: 1.6,
+    sensibilidadMouse: 0.0025,
+    limitePitch: THREE.MathUtils.degToRad(60)
+};
+
+var yawCamara = 0;
+var pitchCamara = THREE.MathUtils.degToRad(10);
+var pointerLockActivo = false;
+
+function init_camara_tercera_persona() {
+    const el = renderer.domElement;
+
+    el.addEventListener('click', function () {
+        if (juegoIniciado && !arcangelInteractivo) {
+            el.requestPointerLock();
+        }
+    });
+
+    document.addEventListener('pointerlockchange', function () {
+        pointerLockActivo = (document.pointerLockElement === el);
+    });
+
+    document.addEventListener('mousemove', function (e) {
+        if (!pointerLockActivo || modoArcangelActivo) return;
+
+        yawCamara -= e.movementX * CAMARA_TERCERA_PERSONA.sensibilidadMouse;
+        pitchCamara -= e.movementY * CAMARA_TERCERA_PERSONA.sensibilidadMouse;
+
+        pitchCamara = THREE.MathUtils.clamp(
+            pitchCamara,
+            -CAMARA_TERCERA_PERSONA.limitePitch,
+            CAMARA_TERCERA_PERSONA.limitePitch
+        );
+    });
+}
+
+// Calcula dónde deberían estar la cámara y su punto de mira para la vista
+// en tercera persona normal, según la posición del personaje y el
+// yaw/pitch actuales. Se separa de actualizarCamaraTercerapersona() para
+// poder reutilizarla también durante la transición suave de la pantalla
+// de bienvenida.
+function calcularDestinoCamaraTercerapersona() {
+    if (!personaje) return null;
+
+    const { distancia, altura, alturaMira } = CAMARA_TERCERA_PERSONA;
+
+    const offsetX = Math.sin(yawCamara) * Math.cos(pitchCamara) * distancia;
+    const offsetZ = Math.cos(yawCamara) * Math.cos(pitchCamara) * distancia;
+    const offsetY = altura + Math.sin(pitchCamara) * distancia;
+
+    return {
+        posicion: new THREE.Vector3(
+            personaje.position.x + offsetX,
+            personaje.position.y + offsetY,
+            personaje.position.z + offsetZ
+        ),
+        mira: new THREE.Vector3(
+            personaje.position.x,
+            personaje.position.y + alturaMira,
+            personaje.position.z
+        )
+    };
+}
+
+function actualizarCamaraTercerapersona() {
+    if (!personaje || modoArcangelActivo) return;
+
+    const destino = calcularDestinoCamaraTercerapersona();
+    if (!destino) return;
+
+    camera.position.copy(destino.posicion);
+    camera.lookAt(destino.mira);
+}
+
+/* =========================================================
+   PANTALLA DE BIENVENIDA (título + botón "INICIAR")
+   ========================================================= */
+
+// Vista panorámica: un poco más lejos y más arriba de donde arranca
+// normalmente la cámara en tercera persona, para que se vea el mundo 3D
+// de fondo mientras el usuario todavía no presiona "INICIAR".
+const CAMARA_VISTA_INICIO = {
+    offsetX: 16,
+    altura: 20,
+    offsetZ: 26
+};
+
+function posicionarCamaraVistaInicio() {
+    const base = POSICION_INICIAL_PERSONAJE;
+    const alturaBase = calcularAlturaTerreno(base.x, base.z);
+
+    camera.position.set(
+        base.x + CAMARA_VISTA_INICIO.offsetX,
+        alturaBase + CAMARA_VISTA_INICIO.altura,
+        base.z + CAMARA_VISTA_INICIO.offsetZ
+    );
+    camera.lookAt(base.x, alturaBase + 2, base.z);
+}
+
+function mostrarPantallaInicio() {
+    posicionarCamaraVistaInicio();
+
+    const pantalla = document.getElementById('pantalla-inicio');
+    if (pantalla) pantalla.classList.add('visible');
+}
+
+// Se llama al pulsar "INICIAR": oculta la pantalla de bienvenida y
+// arranca una transición suave de cámara desde la vista panorámica hacia
+// la vista en tercera persona normal, momento en el que se habilita el
+// control del personaje.
+function iniciarExperiencia() {
+    if (juegoIniciado) return;
+
+    const pantalla = document.getElementById('pantalla-inicio');
+    if (pantalla) pantalla.classList.add('oculto');
+
+    const controlesAyuda = document.getElementById('controles-ayuda');
+    if (controlesAyuda) controlesAyuda.classList.add('visible');
+
+    juegoIniciado = true;
+    transicionCamaraActiva = true;
+    transicionCamaraProgreso = 0;
+    transicionCamaraOrigen = camera.position.clone();
+
+    actualizarInfoPorPosicion();
+}
+
+function init_pantalla_inicio() {
+    const btnIniciar = document.getElementById('btn-iniciar');
+    if (btnIniciar) btnIniciar.addEventListener('click', iniciarExperiencia);
+}
+
+function actualizarTransicionCamara(delta) {
+    if (!transicionCamaraActiva) return;
+
+    const destino = calcularDestinoCamaraTercerapersona();
+    if (!destino || !transicionCamaraOrigen) {
+        transicionCamaraActiva = false;
+        return;
+    }
+
+    transicionCamaraProgreso += delta / DURACION_TRANSICION_CAMARA;
+    const t = Math.min(transicionCamaraProgreso, 1);
+    const tSuave = t * t * (3 - 2 * t); // smoothstep
+
+    camera.position.lerpVectors(transicionCamaraOrigen, destino.posicion, tSuave);
+    camera.lookAt(destino.mira);
+
+    if (t >= 1) {
+        transicionCamaraActiva = false;
+    }
+}
+
+/* =========================================================
+   INFO DE VISTAS / PANEL
+   ========================================================= */
 
 function cargarInfoVistas() {
     const datos = {};
@@ -93,7 +644,12 @@ const INFO_VISTAS = cargarInfoVistas();
 function init() {
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(VISTA_INICIAL.pos.x, VISTA_INICIAL.pos.y, VISTA_INICIAL.pos.z);
+    camera.position.set(
+        POSICION_INICIAL_PERSONAJE.x,
+        6,
+        POSICION_INICIAL_PERSONAJE.z + 8
+    );
+
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputEncoding = THREE.sRGBEncoding;
@@ -104,23 +660,22 @@ function init() {
 
     document.getElementById('contenedor3D').appendChild(renderer.domElement);
 
-    init_controls();
-
     setupIluminacion();
     aplicarModoIluminacion('dia');
 
     crearCielo();
     crearTerreno();
 
-    cargarModelo("modelos3d/iglesia.glb", 0, 0, 0, 1, 1, 1, 0, false);
-    cargarModelo("modelos3d/cura2.glb", -10, 3.3, 0, 5, 5, 5, Math.PI / -2, false);
+    // personaje (true) o es solo decorativo/atravesable (false).
+    cargarModelo("modelos3d/iglesia.glb", 0, 0, 0, 1, 1, 1, 0, true);
+    cargarModelo("modelos3d/cura2.glb", -10, 3.3, 0, 5, 5, 5, Math.PI / -2, true);
     cargarModelo("modelos3d/arcangelop.glb", 0, 9, 0, 2, 2, 2, Math.PI / -2, false);
     cargarModelo("modelos3d/angl.glb", 0, 7, 3, 1.5, 1.5, 1.5, Math.PI / -2, false);
-    cargarModelo("modelos3d/angl.glb", 0, 7, -3, 1.5, 1.5, 1.5, Math.PI / 2, false);
+    cargarModelo("modelos3d/angl.glb", 0, 7, -3, 1.5, 1.5, 1.5, 0, false);
 
-    cargarModelo("modelos3d/arbol.glb", -70, 1, -10, 2, 2, 2, 0, false);
+    cargarModelo("modelos3d/plaza_uncia.glb", -56.85, -4.3, -1.3, 2, 2, 2, 0, true);
 
-    cargarModeloFBX('modelos3d/militar.fbx', -40, 3.3, -12, 0.2, 0.2, 0.2);
+    cargarPersonaje();
 
     POSICIONES_LAMPARAS.forEach(function (pos) {
         cargarModelo("modelos3d/lampara.glb", pos.x, pos.y, pos.z, 1, 1, 1, 0);
@@ -131,56 +686,14 @@ function init() {
     lucesLamparasSpot.push(luzLampara1, luzLampara2);
     actualizarLucesLamparas();
 
-    init_botones();
+    init_pantalla_inicio();
     init_botones_modo();
     init_arcangel_giro();
     init_paneles_flotantes();
+    init_controles_personaje();
+    init_camara_tercera_persona();
 
     window.addEventListener('resize', onWindowResize);
-}
-
-// Carga un FBX y reproduce su animación si trae alguna
-function cargarModeloFBX(archivo, x, y, z, l, m, n) {
-    x = (x !== undefined) ? x : 0;
-    y = (y !== undefined) ? y : 0;
-    z = (z !== undefined) ? z : 0;
-    l = (l !== undefined) ? l : 1;
-    m = (m !== undefined) ? m : 1;
-    n = (n !== undefined) ? n : 1;
-
-    const loader = new THREE.FBXLoader();
-    loader.load(
-        archivo,
-        function (modelo) {
-            modelo.scale.set(l, m, n);
-            modelo.position.set(x, y, z);
-
-            modelo.traverse(function (child) {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-
-                if (child.isLight) {
-                    child.intensity *= 0;
-                }
-            });
-
-            if (modelo.animations && modelo.animations.length > 0) {
-                const mixer = new THREE.AnimationMixer(modelo);
-                const accion = mixer.clipAction(modelo.animations[0]);
-                accion.play();
-                mixers.push(mixer);
-            }
-
-            scene.add(modelo);
-            console.log('Modelo FBX cargado correctamente:', archivo);
-        },
-        undefined,
-        function (error) {
-            console.error('❌ Error al cargar el FBX:', error);
-        }
-    );
 }
 
 function push_spot_light(color, intensity, distancia, angulo, px, py, pz) {
@@ -211,8 +724,8 @@ function actualizarLucesLamparas() {
 const ALTURA_BASE_TERRENO = -2.8;
 const AMPLITUD_COLINAS = 6;
 const ESCALA_RUIDO = 0.02;
-const RADIO_ZONA_PLANA = 30;
-const RADIO_TRANSICION = 60;
+const RADIO_ZONA_PLANA = 60;
+const RADIO_TRANSICION = 120;
 
 // Ruido tipo "value noise" hecho a mano, sin librerías externas
 function ruido2D(x, y) {
@@ -254,7 +767,7 @@ function suavizarEntre(x, borde0, borde1) {
     return t * t * (3 - 2 * t);
 }
 
-// Altura del terreno en (x, z); la usan tanto el suelo como los árboles
+// Altura del terreno en (x, z); la usan tanto el suelo como el personaje
 function calcularAlturaTerreno(x, z) {
     const distanciaCentro = Math.sqrt(x * x + z * z);
     const factorRelieve = suavizarEntre(distanciaCentro, RADIO_ZONA_PLANA, RADIO_TRANSICION);
@@ -286,7 +799,7 @@ function crearTerreno() {
 
     const material = new THREE.MeshStandardMaterial({ map: texturaPasto });
 
-    const terrenoMesh = new THREE.Mesh(geometry, material);
+    terrenoMesh = new THREE.Mesh(geometry, material);
     terrenoMesh.receiveShadow = true;
     scene.add(terrenoMesh);
 
@@ -323,6 +836,8 @@ function cargarModelo(archivo, x, y, z, l, m, n, a, esTrofeo) {
                     child.castShadow = true;
                     child.receiveShadow = true;
 
+                    corregirMaterialSolido(child.material);
+
                     if (child.material) {
                         if (child.material.map) {
                             child.material.map.encoding = THREE.sRGBEncoding;
@@ -337,11 +852,28 @@ function cargarModelo(archivo, x, y, z, l, m, n, a, esTrofeo) {
             scene.add(modelo);
 
             if (esTrofeo) {
+                // Se registra el objeto real (no una caja que lo envuelva) para
+                // que el personaje choque contra su geometría real y pueda
+                // entrar por puertas/huecos aunque el modelo sea, por ejemplo,
+                // la iglesia completa.
                 modelo.updateMatrixWorld(true);
-                const caja = new THREE.Box3().setFromObject(modelo);
-                if (isFinite(caja.min.x) && isFinite(caja.max.x)) {
-                    cajasColision.push(caja);
-                }
+
+                // Blender a veces exporta caras con la normal "al revés". Si el
+                // material queda a una sola cara (FrontSide, el valor por
+                // defecto), el raycast de colisión puede atravesar esa cara sin
+                // detectarla según desde qué lado se acerque el personaje. Para
+                // que el choque sea confiable sin importar la normal, se fuerza
+                // doble cara SOLO en los objetos colisionables.
+                modelo.traverse(function (child) {
+                    if (child.isMesh && child.material) {
+                        const materialesHijo = Array.isArray(child.material) ? child.material : [child.material];
+                        materialesHijo.forEach(function (mat) {
+                            mat.side = THREE.DoubleSide;
+                        });
+                    }
+                });
+
+                objetosColisionables.push(modelo);
             }
 
             progresoModelos[indice].loaded = progresoModelos[indice].total || 1;
@@ -382,6 +914,7 @@ function cargarModeloIndividual(archivo, x, y, z, l, m, n, a, callback) {
                 if (child.isMesh) {
                     child.castShadow = true;
                     child.receiveShadow = true;
+                    corregirMaterialSolido(child.material);
                     if (child.material && child.material.map) {
                         child.material.map.encoding = THREE.sRGBEncoding;
                     }
@@ -428,16 +961,14 @@ function reportarProgreso() {
 function ocultarPantallaCarga() {
     const overlay = document.getElementById('pantalla-carga');
     const contenedor = document.getElementById('contenedor3D');
-    const panelBotones = document.getElementById('panel-botones');
 
     if (!overlay) return;
 
     setTimeout(function () {
         overlay.classList.add('oculto');
         if (contenedor) contenedor.classList.add('visible');
-        if (panelBotones) panelBotones.classList.add('visible');
 
-        mostrarInfo('inicio');
+        mostrarPantallaInicio();
 
         overlay.addEventListener('transitionend', function () {
             overlay.remove();
@@ -451,6 +982,54 @@ const POSICION_INFO = {
     altar: 'panel-derecha',
     arcangel: 'panel-izquierda'
 };
+
+/* =========================================================
+   CONTENIDO DEL PANEL SEGÚN LA POSICIÓN DEL PERSONAJE
+   ========================================================= */
+
+// El plano se divide en 4 sectores a lo largo de X (todos entre
+// z = -10 y z = 10). Cada sector muestra automáticamente el contenido
+// que antes mostraban los botones de navegación. Fuera de este plano
+// (en X o en Z) no se muestra ningún contenido.
+const ZONAS_INFO = [
+    { clave: 'arcangel', xMin: -20, xMax: 0 },   // 0 a -20
+    { clave: 'altar', xMin: -40, xMax: -20 },    // -20 a -40
+    { clave: 'inicio', xMin: -50, xMax: -40 },   // -40 a -50
+    { clave: 'interior', xMin: -70, xMax: -50 }  // -50 a -70
+];
+const Z_MINIMO_ZONAS = -10;
+const Z_MAXIMO_ZONAS = 10;
+
+function obtenerZonaPorPosicion(x, z) {
+    if (z < Z_MINIMO_ZONAS || z > Z_MAXIMO_ZONAS) return null;
+
+    for (let i = 0; i < ZONAS_INFO.length; i++) {
+        const zona = ZONAS_INFO[i];
+        if (x > zona.xMin && x <= zona.xMax) return zona.clave;
+    }
+    return null;
+}
+
+var zonaInfoActual = null;
+
+function actualizarInfoPorPosicion() {
+    if (!personaje || !juegoIniciado || modoArcangelActivo) return;
+
+    const zona = obtenerZonaPorPosicion(personaje.position.x, personaje.position.z);
+    if (zona === zonaInfoActual) return;
+    zonaInfoActual = zona;
+
+    if (zona) {
+        mostrarInfo(zona);
+    } else {
+        ocultarInfo();
+    }
+}
+
+function ocultarInfo() {
+    const panel = document.getElementById('panel-info');
+    if (panel) panel.classList.remove('visible');
+}
 
 function mostrarInfo(clave) {
     const datos = INFO_VISTAS[clave];
@@ -548,20 +1127,6 @@ function configurarCierrePaneles() {
     });
 }
 
-function init_controls() {
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.target.set(VISTA_INICIAL.target.x, VISTA_INICIAL.target.y, VISTA_INICIAL.target.z);
-
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.enableZoom = true;
-    controls.enablePan = false;
-    controls.autoRotate = false;
-
-    controls.update();
-    actualizarLimitesControles();
-}
-
 function init_arcangel_giro() {
     const el = renderer.domElement;
     let arrastrando = false;
@@ -592,157 +1157,6 @@ function init_arcangel_giro() {
     window.addEventListener('pointercancel', terminar);
 }
 
-// Limita cuánto puede orbitar y hacer zoom la cámara; en la vista de inicio usa el
-// rango horizontal amplio, en el resto de vistas usa el rango vertical en todas direcciones
-function actualizarLimitesControles() {
-    const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
-    const esferico = new THREE.Spherical().setFromVector3(offset);
-
-    const rangoActivo = (vistaActual === 'inicial') ? RANGO_MOVIMIENTO_HORIZONTAL : RANGO_MOVIMIENTO_VERTICAL;
-    const rangoHorizontal = THREE.MathUtils.degToRad(rangoActivo);
-    const rangoVertical = THREE.MathUtils.degToRad(RANGO_MOVIMIENTO_VERTICAL);
-
-    controls.minAzimuthAngle = esferico.theta - rangoHorizontal;
-    controls.maxAzimuthAngle = esferico.theta + rangoHorizontal;
-
-    controls.minPolarAngle = Math.max(0.01, esferico.phi - rangoVertical);
-    controls.maxPolarAngle = Math.min(Math.PI - 0.01, esferico.phi + rangoVertical);
-
-    controls.minDistance = Math.max(0.1, esferico.radius - rangoActivo);
-    controls.maxDistance = esferico.radius + rangoActivo;
-
-    controls.update();
-}
-
-function apuntarCamara(x, y, z) {
-    controls.target.set(x, y, z);
-    controls.update();
-    actualizarLimitesControles();
-}
-
-function moverCamara(posDestino, targetDestino, duracion) {
-    if (duracion === undefined) duracion = 1200;
-    if (animandoCamara) return;
-
-    animandoCamara = true;
-    controls.enabled = false;
-
-    controls.minAzimuthAngle = -Infinity;
-    controls.maxAzimuthAngle = Infinity;
-    controls.minPolarAngle = 0;
-    controls.maxPolarAngle = Math.PI;
-    controls.minDistance = 0;
-    controls.maxDistance = Infinity;
-
-    const posInicio = camera.position.clone();
-    const targetInicio = controls.target.clone();
-    const tiempoInicio = performance.now();
-
-    function paso(ahora) {
-        const t = Math.min((ahora - tiempoInicio) / duracion, 1);
-        const suave = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-        camera.position.lerpVectors(posInicio, posDestino, suave);
-        controls.target.lerpVectors(targetInicio, targetDestino, suave);
-        controls.update();
-
-        if (t < 1) {
-            requestAnimationFrame(paso);
-        } else {
-            animandoCamara = false;
-            controls.enabled = true;
-            actualizarLimitesControles();
-        }
-    }
-
-    requestAnimationFrame(paso);
-}
-
-function init_botones() {
-    const btnInicio = document.getElementById('btn-inicio');
-    const btnInterior = document.getElementById('btn-interior');
-    const btnAltar = document.getElementById('btn-altar');
-    const btnArcangel = document.getElementById('btn-arcangel');
-
-    if (btnInicio) {
-        btnInicio.addEventListener('click', function () {
-            ocultarArcangel();
-
-            if (vistaActual === 'inicial') return;
-
-            vistaActual = 'inicial';
-            moverCamara(
-                new THREE.Vector3(VISTA_INICIAL.pos.x, VISTA_INICIAL.pos.y, VISTA_INICIAL.pos.z),
-                new THREE.Vector3(VISTA_INICIAL.target.x, VISTA_INICIAL.target.y, VISTA_INICIAL.target.z)
-            );
-            mostrarInfo('inicio');
-        });
-    }
-
-    if (btnInterior) {
-        btnInterior.addEventListener('click', function () {
-            ocultarArcangel();
-
-            mostrarInfo('interior');
-
-            if (vistaActual === 'interior') return;
-
-            vistaActual = 'interior';
-            moverCamara(
-                new THREE.Vector3(VISTA_INTERIOR.pos.x, VISTA_INTERIOR.pos.y, VISTA_INTERIOR.pos.z),
-                new THREE.Vector3(VISTA_INTERIOR.target.x, VISTA_INTERIOR.target.y, VISTA_INTERIOR.target.z)
-            );
-        });
-    }
-
-    if (btnAltar) {
-        btnAltar.addEventListener('click', function () {
-            ocultarArcangel();
-
-            mostrarInfo('altar');
-
-            if (vistaActual === 'altar') return;
-            vistaActual = 'altar';
-            moverCamara(
-                new THREE.Vector3(VISTA_ALTAR.pos.x, VISTA_ALTAR.pos.y, VISTA_ALTAR.pos.z),
-                new THREE.Vector3(VISTA_ALTAR.target.x, VISTA_ALTAR.target.y, VISTA_ALTAR.target.z)
-            );
-        });
-    }
-    if (btnArcangel) {
-        btnArcangel.addEventListener('click', function () {
-            if (arcangelCargado) {
-                mostrarArcangel();
-                return;
-            }
-
-            btnArcangel.disabled = true;
-            const textoOriginal = btnArcangel.textContent;
-            btnArcangel.textContent = 'Cargando...';
-
-            cargarModeloIndividual(
-                "modelos3d/arcangelop.glb",
-                0, 0, 0,
-                1, 1, 1, VISTA_ARCANGEL.rotacionBase,
-                function (modelo) {
-                    btnArcangel.disabled = false;
-                    btnArcangel.textContent = textoOriginal;
-
-                    if (modelo) {
-                        modeloArcangel = modelo;
-                        arcangelCargado = true;
-
-                        VISTA_ARCANGEL.distanciaCamara = calcularDistanciaArcangel(modelo);
-                        mostrarArcangel();
-                    } else {
-                        console.error('No se pudo cargar el modelo del arcángel.');
-                    }
-                }
-            );
-        });
-    }
-}
-
 function mostrarArcangel() {
     if (!modeloArcangel) return;
 
@@ -751,8 +1165,13 @@ function mostrarArcangel() {
     posicionarArcangelFrenteCamara();
     mostrarInfo('arcangel');
 
-    controls.enabled = false;
     arcangelInteractivo = true;
+    modoArcangelActivo = true;
+
+    if (document.pointerLockElement) {
+        document.exitPointerLock();
+    }
+
     renderer.domElement.style.cursor = 'grab';
 }
 
@@ -761,7 +1180,7 @@ function ocultarArcangel() {
         modeloArcangel.visible = false;
     }
     arcangelInteractivo = false;
-    controls.enabled = true;
+    modoArcangelActivo = false;
     renderer.domElement.style.cursor = '';
 }
 
@@ -953,12 +1372,21 @@ function animate() {
         mixer.update(delta);
     });
 
+    actualizarPersonaje(delta);
+
+    if (transicionCamaraActiva) {
+        actualizarTransicionCamara(delta);
+    } else if (juegoIniciado) {
+        actualizarCamaraTercerapersona();
+    }
+
+    actualizarInfoPorPosicion();
+
     if (modeloArcangel && modeloArcangel.visible) {
         posicionarArcangelFrenteCamara();
         modeloArcangel.position.y += Math.sin(performance.now() * 0.0012) * 0.15;
     }
 
-    controls.update();
     renderer.render(scene, camera);
 }
 
